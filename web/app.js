@@ -699,15 +699,125 @@ class SessionView {
 
 // ---------- new session view ----------
 
+const NAME_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const NAME_HINT = "a–z, 0–9, dashes. Never reused.";
+
 class NewView {
   constructor() {
     this.kind = "new";
-    main().replaceChildren(h("div", { class: "empty", text: "New session: coming next." }));
+    this.closed = false;
+    this.busy = false;
+    this.dirTouched = false;
+    const E = (this.el = {});
+    const submitKey = (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        this.submit();
+      }
+    };
+    E.name = h("input", { id: "name", class: "field", autocomplete: "off", spellcheck: "false", oninput: () => this.checkName() });
+    E.nameMsg = h("span", { class: "field-hint", text: NAME_HINT });
+    E.dir = h("input", {
+      id: "dir", class: "field", autocomplete: "off", spellcheck: "false",
+      oninput: () => { this.dirTouched = true; this.renderChips(); },
+    });
+    E.chips = h("div", { class: "dir-chips" });
+    E.prompt = h("textarea", { id: "prompt", class: "field field-text", rows: 10, onkeydown: submitKey });
+    E.start = h("button", { type: "submit", class: "btn-start" }, "Start session");
+    E.err = h("div", { class: "form-error", role: "alert" });
+    const form = h("form", { class: "new-form", onsubmit: (e) => { e.preventDefault(); this.submit(); } },
+      h("div", { class: "new-head" },
+        h("h1", { text: "New session" }),
+        h("p", { text: "Runs through agentic on the box. git push asks you first." })),
+      h("div", { class: "new-grid" },
+        h("div", { class: "new-field" }, h("label", { for: "name", class: "lbl" }, "Name"), E.name, E.nameMsg),
+        h("div", { class: "new-field" }, h("label", { for: "dir", class: "lbl" }, "Directory"), E.dir,
+          h("span", { class: "field-hint", text: "Created if it doesn't exist." }))),
+      E.chips,
+      h("div", { class: "new-field" }, h("label", { for: "prompt", class: "lbl" }, "First message"), E.prompt),
+      h("div", { class: "new-actions" },
+        E.start,
+        h("button", { type: "button", class: "btn-cancel", onclick: () => this.cancel() }, "Cancel"),
+        h("span", { class: "kbd new-kbd", text: (isMac ? "⌘↵" : "Ctrl+↵") + " to start" })),
+      E.err);
+    main().replaceChildren(h("div", { class: "new-page" }, form));
+    this.updateDirs();
+    E.name.focus();
   }
 
-  updateDirs() {}
+  close() {
+    this.closed = true;
+  }
 
-  close() {}
+  checkName() {
+    const v = this.el.name.value.trim();
+    const bad = v !== "" && !NAME_RE.test(v);
+    this.el.nameMsg.textContent = bad ? "Lowercase a–z, 0–9 and dashes, starting with a letter or digit, at most 40." : NAME_HINT;
+    this.el.nameMsg.classList.toggle("bad", bad);
+    return !bad && v !== "";
+  }
+
+  // updateDirs fills the directory with the newest recent dir until the user types one.
+  updateDirs() {
+    const dirs = recentDirs();
+    if (!this.dirTouched && !this.el.dir.value && dirs.length) this.el.dir.value = dirs[0];
+    this.renderChips();
+  }
+
+  renderChips() {
+    const dirs = recentDirs();
+    const cur = this.el.dir.value.trim();
+    this.el.chips.replaceChildren(
+      dirs.length ? h("span", { class: "field-hint", text: "Recent" }) : null,
+      ...dirs.map((d) => h("button", {
+        type: "button",
+        class: "dir" + (d === cur ? " on" : ""),
+        title: d,
+        onclick: () => { this.el.dir.value = d; this.dirTouched = true; this.renderChips(); },
+      }, d.replace(/\/+$/, "").split("/").pop() || d)));
+  }
+
+  async submit() {
+    if (this.busy) return;
+    const E = this.el;
+    const name = E.name.value.trim();
+    const dir = E.dir.value.trim();
+    const prompt = E.prompt.value;
+    E.err.textContent = "";
+    if (!this.checkName()) {
+      E.err.textContent = name ? "Fix the name first." : "Name is required.";
+      E.name.focus();
+      return;
+    }
+    if (!dir) {
+      E.err.textContent = "Directory is required.";
+      E.dir.focus();
+      return;
+    }
+    if (!prompt.trim()) {
+      E.err.textContent = "Write a first message.";
+      E.prompt.focus();
+      return;
+    }
+    this.busy = true;
+    E.start.disabled = true;
+    try {
+      const s = await api("POST", "/sessions", { name, dir, prompt });
+      if (this.closed) return;
+      pollList();
+      location.hash = "#/s/" + enc(s.name);
+    } catch (e) {
+      if (!this.closed) E.err.textContent = e.message;
+    } finally {
+      this.busy = false;
+      if (!this.closed) E.start.disabled = false;
+    }
+  }
+
+  cancel() {
+    if (S.prevHash && S.prevHash !== "#/new") history.back();
+    else location.hash = "#/";
+  }
 }
 
 // ---------- start ----------
