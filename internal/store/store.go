@@ -84,6 +84,16 @@ CREATE TABLE IF NOT EXISTS events (
 	data TEXT NOT NULL,
 	PRIMARY KEY (session, seq)
 );
+CREATE TABLE IF NOT EXISTS approvals (
+	ask_id TEXT PRIMARY KEY,
+	session TEXT NOT NULL,
+	kind TEXT NOT NULL,
+	title TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	state TEXT NOT NULL,
+	resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS approvals_state ON approvals (state, created_at);
 `
 
 // Open opens (creating if needed) dataDir/harness.db and dataDir/blobs.
@@ -234,6 +244,11 @@ func (s *Store) BeginTurn(name string) (int, error) {
 // AppendEvent stores an event with the session's next seq. Strings in data over BlobThreshold are
 // moved to blob files first.
 func (s *Store) AppendEvent(session, typ string, data map[string]any) (Event, error) {
+	return s.AppendEventWith(session, typ, data, nil)
+}
+
+// AppendEventWith is AppendEvent with also, when set, run in the same transaction.
+func (s *Store) AppendEventWith(session, typ string, data map[string]any, also func(*sql.Tx) error) (Event, error) {
 	if data == nil {
 		data = map[string]any{}
 	}
@@ -264,6 +279,11 @@ func (s *Store) AppendEvent(session, typ string, data map[string]any) (Event, er
 	if _, err := tx.Exec(`INSERT INTO events (session, seq, ts, type, data) VALUES (?, ?, ?, ?, ?)`,
 		session, ev.Seq, ev.TS, ev.Type, string(ev.Data)); err != nil {
 		return Event{}, err
+	}
+	if also != nil {
+		if err := also(tx); err != nil {
+			return Event{}, err
+		}
 	}
 	return ev, tx.Commit()
 }

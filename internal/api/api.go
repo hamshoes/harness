@@ -22,6 +22,7 @@ type Server struct {
 	Store         *store.Store
 	Version       string
 	ClaudeVersion string
+	Spool         string
 	Log           *slog.Logger
 }
 

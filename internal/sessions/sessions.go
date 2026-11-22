@@ -7,6 +7,7 @@ package sessions
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -87,14 +88,30 @@ func (m *Manager) get(name string) *session {
 }
 
 func (m *Manager) emit(s *session, typ string, data map[string]any) {
+	if err := m.emitWith(s, typ, data, nil); err != nil {
+		m.log.Error("storing event", "session", s.name, "type", typ, "err", err)
+	}
+}
+
+// emitWith appends an event, running also in the same transaction, and publishes it once committed.
+func (m *Manager) emitWith(s *session, typ string, data map[string]any, also func(*sql.Tx) error) error {
 	s.emitMu.Lock()
 	defer s.emitMu.Unlock()
-	ev, err := m.store.AppendEvent(s.name, typ, data)
+	ev, err := m.store.AppendEventWith(s.name, typ, data, also)
 	if err != nil {
-		m.log.Error("storing event", "session", s.name, "type", typ, "err", err)
-		return
+		return err
 	}
 	s.bc.publish(ev)
+	return nil
+}
+
+// Append adds an event to an existing session from outside a turn (the approvals watcher), running
+// also in the same transaction.
+func (m *Manager) Append(name, typ string, data map[string]any, also func(*sql.Tx) error) error {
+	if _, err := m.store.GetSession(name); err != nil {
+		return err
+	}
+	return m.emitWith(m.get(name), typ, data, also)
 }
 
 func (m *Manager) setStatus(s *session, status string) {

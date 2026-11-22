@@ -33,6 +33,7 @@ const (
 	maxLine     = 16 << 20 // longest stdout line accepted
 	stderrCap   = 200      // stderr lines kept per turn
 	drainGrace  = 3 * time.Second
+	reapGrace   = 5 * time.Second
 	scanBufInit = 64 << 10
 )
 
@@ -119,7 +120,7 @@ func Start(t Turn) (*Proc, error) {
 	go func() {
 		code := exitCode(cmd.Wait())
 		if p.signaled.Load() {
-			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // leftovers holding the pipes open
+			reapGroup(cmd.Process.Pid)
 		}
 		drained := make(chan struct{})
 		go func() { readers.Wait(); close(drained) }()
@@ -152,6 +153,16 @@ func (p *Proc) Done() <-chan struct{} { return p.done }
 func (p *Proc) Wait() Result {
 	<-p.done
 	return p.res
+}
+
+// reapGroup gives what is left of a torn-down turn's process group reapGrace to exit on its own (agentic's
+// hook uses it to withdraw a pending approval), then kills the rest.
+func reapGroup(pgid int) {
+	deadline := time.Now().Add(reapGrace)
+	for syscall.Kill(-pgid, 0) == nil && time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+	}
+	syscall.Kill(-pgid, syscall.SIGKILL)
 }
 
 func exitCode(err error) int {
