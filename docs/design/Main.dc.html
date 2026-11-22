@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>harness</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1115}
+a{color:#C9CED6;text-decoration:none}a:hover{color:#FFFFFF}
+.pill{font:600 11px/1 Inter,sans-serif;letter-spacing:.04em;text-transform:uppercase;padding:5px 8px;border-radius:999px;white-space:nowrap}
+.pill.running{background:#6CA8FF;color:#0F1115}
+.pill.waiting{background:#F2B544;color:#0F1115}
+.pill.idle{border:1px solid #5B6472;color:#C9CED6;padding:4px 7px}
+.pill.failed{border:1px solid #FF8A8A;color:#FF8A8A;padding:4px 7px}
+.pill.stopped{background:#232731;color:#9AA3AF}
+.row{display:flex;flex-direction:column;gap:6px;width:100%;text-align:left;padding:12px 14px;border-radius:12px;border:1px solid transparent;background:transparent;color:#E6E8EC;cursor:pointer;font-family:Inter,sans-serif}
+.row:hover{background:#171A21}
+.row.on{background:#1B2030;border-color:#2C3650}
+.chip{font:500 12px/1 Inter,sans-serif;padding:0 10px;height:30px;border-radius:999px;border:1px solid #2A2F3A;background:transparent;color:#C9CED6;cursor:pointer}
+.chip.on{background:#E6E8EC;color:#0F1115;border-color:#E6E8EC}
+.tool{display:flex;align-items:center;gap:10px;font:400 13px/1.4 'JetBrains Mono',monospace;color:#C9CED6;padding:9px 12px;border-radius:10px;background:#141720;border:1px solid #1E222B}
+.kv{display:flex;justify-content:space-between;gap:12px;font:400 12px/1.4 'JetBrains Mono',monospace}
+.kv span:first-child{color:#9AA3AF}
+.kv span:last-child{color:#E6E8EC;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+</helmet>
+<div style="height: 100vh; min-height: 640px; box-sizing: border-box; background: #0F1115; color: #E6E8EC; font-family: Inter, sans-serif; display: flex; flex-wrap: wrap; overflow: hidden">
+
+  <aside style="flex: 1 1 300px; max-width: 320px; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; border-right: 1px solid #1E222B; background: #0C0E12">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 18px 16px 12px">
+      <span style="font: 600 15px JetBrains Mono, monospace">harness</span>
+      <a href="New.dc.html" style="display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; background: #E6E8EC; color: #0F1115; font-weight: 600; font-size: 13px">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        New
+      </a>
+    </div>
+    <div style="display: flex; gap: 6px; padding: 0 16px 12px; flex-wrap: wrap">
+      <sc-for list="{{filters}}" as="f" hint-placeholder-count="4">
+        <button class="{{f.cls}}" onClick="{{f.pick}}">{{f.label}}</button>
+      </sc-for>
+    </div>
+    <nav aria-label="Sessions" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 0 8px 12px">
+      <sc-for list="{{shown}}" as="s" hint-placeholder-count="5">
+        <button class="{{s.rowCls}}" onClick="{{s.pick}}">
+          <span style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%">
+            <span style="font: 500 14px JetBrains Mono, monospace">{{s.name}}</span>
+            <span class="pill {{s.status}}">{{s.statusLabel}}</span>
+          </span>
+          <span style="font-size: 13px; line-height: 1.4; color: #AEB5C0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden">{{s.last}}</span>
+          <span style="font: 400 11px JetBrains Mono, monospace; color: #9AA3AF">{{s.dir}} · {{s.ago}}</span>
+        </button>
+      </sc-for>
+    </nav>
+    <div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid #1E222B; font: 400 11px JetBrains Mono, monospace; color: #9AA3AF">
+      <span style="width: 7px; height: 7px; border-radius: 50%; background: #5FD08A" aria-hidden="true"></span>
+      devbox:8080 · 2 running · 1 waiting
+    </div>
+  </aside>
+
+  <main style="flex: 999 1 560px; min-width: 0; height: 100%; display: flex; flex-direction: column">
+    <header style="display: flex; align-items: center; gap: 14px; padding: 16px 28px; border-bottom: 1px solid #1E222B; flex-wrap: wrap">
+      <h1 style="margin: 0; font: 600 20px JetBrains Mono, monospace">{{cur.name}}</h1>
+      <span class="pill {{curStatus}}">{{curStatusLabel}}</span>
+      <span style="font: 400 12px JetBrains Mono, monospace; color: #9AA3AF">{{cur.dir}} · turn {{cur.turns}}</span>
+      <button style="margin-left: auto; height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #4A2A2A; background: transparent; color: #FF8A8A; font: 600 13px Inter, sans-serif; cursor: pointer">Stop session</button>
+    </header>
+
+    <div style="flex: 1; display: flex; min-height: 0">
+      <section aria-label="Event log" style="flex: 1; min-width: 0; overflow-y: auto; padding: 24px 28px">
+        <div style="max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px">
+          <sc-for list="{{log}}" as="e" hint-placeholder-count="6">
+            <sc-if value="{{e.isUser}}" hint-placeholder-val="{{ false }}">
+              <div style="align-self: flex-end; max-width: 75%; padding: 10px 14px; border-radius: 14px 14px 4px 14px; background: #26324A; font-size: 14px; line-height: 1.5">{{e.text}}</div>
+            </sc-if>
+            <sc-if value="{{e.isText}}" hint-placeholder-val="{{ true }}">
+              <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #E6E8EC">{{e.text}}</p>
+            </sc-if>
+            <sc-if value="{{e.isTool}}" hint-placeholder-val="{{ false }}">
+              <div class="tool">
+                <span style="color: #9AA3AF; min-width: 44px">{{e.tool}}</span>
+                <span style="flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{e.text}}</span>
+                <span style="color: {{e.resColor}}">{{e.res}}</span>
+              </div>
+            </sc-if>
+          </sc-for>
+
+          <sc-if value="{{showAsk}}" hint-placeholder-val="{{ true }}">
+            <section aria-label="Approval" style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 16px 18px; border-radius: 14px; background: #2A2213; border: 1px solid #5C4718">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#F2B544" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2.5 18 17H2z"/><path d="M10 8v4M10 14.5v.01"/></svg>
+              <div style="flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 4px">
+                <span style="font-weight: 600; font-size: 14px; color: #F7D38A">git push needs approval</span>
+                <span style="font: 400 12px JetBrains Mono, monospace; color: #E9DDBE">origin main · 2 commits · 3 files · no env-like files</span>
+                <span style="font-size: 12px; color: #D9C9A3">Also in the Mac dialog. Whichever answers first wins.</span>
+              </div>
+              <div style="display: flex; gap: 8px">
+                <button onClick="{{deny}}" style="height: 36px; padding: 0 18px; border-radius: 8px; border: 0; background: #E6E8EC; color: #0F1115; font: 600 13px Inter, sans-serif; cursor: pointer">Deny</button>
+                <button onClick="{{allow}}" style="height: 36px; padding: 0 18px; border-radius: 8px; border: 1px solid #8A6A22; background: transparent; color: #F7D38A; font: 600 13px Inter, sans-serif; cursor: pointer">Allow</button>
+              </div>
+            </section>
+          </sc-if>
+          <sc-if value="{{showResolved}}" hint-placeholder-val="{{ false }}">
+            <div class="tool"><span style="color: #9AA3AF; min-width: 44px">ask</span><span style="flex: 1">git push origin main</span><span style="color: {{resolvedColor}}">{{decisionLabel}}</span></div>
+            <p style="margin: 0; font-size: 14px; line-height: 1.6">{{after}}</p>
+          </sc-if>
+        </div>
+      </section>
+
+      <aside aria-label="Session details" style="width: 280px; flex-shrink: 0; border-left: 1px solid #1E222B; padding: 20px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto">
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #9AA3AF">Session</h2>
+          <div class="kv"><span>dir</span><span>{{cur.dir}}</span></div>
+          <div class="kv"><span>turns</span><span>{{cur.turns}}</span></div>
+          <div class="kv"><span>seq</span><span>{{cur.seq}}</span></div>
+          <div class="kv"><span>claude id</span><span>{{cur.cid}}</span></div>
+          <div class="kv"><span>created</span><span>{{cur.created}}</span></div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #9AA3AF">Waiting on</h2>
+          <span style="font: 400 12px JetBrains Mono, monospace; color: {{waitColor}}">{{waitText}}</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #9AA3AF">Last turn</h2>
+          <div class="kv"><span>duration</span><span>{{cur.dur}}</span></div>
+          <div class="kv"><span>cost</span><span>{{cur.cost}}</span></div>
+        </div>
+      </aside>
+    </div>
+
+    <form style="padding: 14px 28px 20px; border-top: 1px solid #1E222B">
+      <div style="max-width: 760px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end">
+        <label for="reply" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Reply</label>
+        <textarea id="reply" rows="2" disabled="{{busy}}" placeholder="{{placeholder}}" style="flex: 1; box-sizing: border-box; resize: none; padding: 11px 14px; border-radius: 10px; border: 1px solid #2A2F3A; background: #141720; color: #E6E8EC; font: 400 14px/1.5 Inter, sans-serif"></textarea>
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px">
+          <button type="button" disabled="{{busy}}" style="height: 36px; padding: 0 16px; border-radius: 8px; border: 0; background: {{sendBg}}; color: {{sendFg}}; font: 600 13px Inter, sans-serif">Send</button>
+          <span style="font: 400 11px JetBrains Mono, monospace; color: #9AA3AF">⌘↵</span>
+        </div>
+      </div>
+    </form>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { filter: 'all', sel: 'fix-lock', decision: null }; }
+  renderVals() {
+    const T = (text) => ({ isText: true, text });
+    const U = (text) => ({ isUser: true, text });
+    const X = (tool, text, res) => ({ isTool: true, tool, text, res, resColor: res === 'held' ? '#F2B544' : res === 'error' ? '#FF8A8A' : '#5FD08A' });
+    const sessions = [
+      { name: 'fix-lock', status: 'waiting', statusLabel: 'Waiting', last: 'Committed the loader change. Pushing to origin/main.', dir: '~/src/hq', turns: 3, ago: '2m', seq: 48, cid: '7c1e…a90f', created: '09:12', dur: '1m 48s', cost: '$0.21',
+        log: [U('the lock loader reads devbox.lock twice on start, can you tidy it?'), T('Found it: Load() is called from both main and the tether setup. Moving it to one place.'), X('Edit', 'internal/lock/lock.go', 'ok'), X('Edit', 'cmd/client/main.go', 'ok'), T('Done. One load at start, passed down.'), U('good, commit it and push'), X('Bash', 'go vet ./...', 'ok'), X('Bash', 'git commit -m "fix(lock): load once at start"', 'ok'), T('Committed. Pushing to origin/main.'), X('Bash', 'git push origin main', 'held')] },
+      { name: 'notify-retry', status: 'running', statusLabel: 'Running', last: 'Running go vet ./... in pairs/notify', dir: '~/src/devbox-tools', turns: 1, ago: 'now', seq: 19, cid: '2b84…11c3', created: '09:31', dur: '—', cost: '—',
+        log: [U('notify asks get lost if the Mac reconnects mid-dialog. Find why.'), T('Looking at the re-send on reconnect in pairs/notify/vm.'), X('Read', 'pairs/notify/vm/spool.go', 'ok'), X('Bash', 'go vet ./...', '…')] },
+      { name: 'harness-ui', status: 'idle', statusLabel: 'Idle', last: 'Done. The list now groups by status. Add the reply box next?', dir: '~/src/harness', turns: 6, ago: '18m', seq: 212, cid: '9fa0…5e71', created: '08:40', dur: '3m 02s', cost: '$0.44',
+        log: [U('group the session list by status'), X('Edit', 'web/list.html', 'ok'), T('Done. The list now groups by status. Add the reply box next?')] },
+      { name: 'svc-docs', status: 'failed', statusLabel: 'Failed', last: 'claude exited 1: no init event on first turn', dir: '~/src/hq', turns: 1, ago: '1h', seq: 4, cid: '—', created: '08:05', dur: '2s', cost: '—',
+        log: [U('update the services section of the README'), X('exit', 'claude exited 1 (no init event)', 'error')] },
+      { name: 'hello', status: 'stopped', statusLabel: 'Stopped', last: 'Listed 9 tools; newest is agentic.', dir: '~/src/devbox-tools', turns: 2, ago: 'yesterday', seq: 37, cid: '44de…0b2a', created: 'Sat', dur: '14s', cost: '$0.03',
+        log: [U('list the tools in this repo, briefly'), T('9 tools: agentic, bb, controld, …'), U('which is newest?'), T('agentic.')] }
+    ];
+    const st = this.state;
+    const groups = { all: null, active: ['running','waiting'], idle: ['idle'], ended: ['failed','stopped'] };
+    const shown = (groups[st.filter] ? sessions.filter(s => groups[st.filter].includes(s.status)) : sessions)
+      .map(s => ({ ...s, rowCls: 'row' + (s.name === st.sel ? ' on' : ''), pick: () => this.setState({ sel: s.name }) }));
+    const filters = [['all','All'],['active','Active'],['idle','Idle'],['ended','Ended']].map(([id,label]) => ({ label, cls: 'chip' + (st.filter === id ? ' on' : ''), pick: () => this.setState({ filter: id }) }));
+    const cur = sessions.find(s => s.name === st.sel) || sessions[0];
+    const isLock = cur.name === 'fix-lock';
+    const d = st.decision;
+    let curStatus = cur.status, curStatusLabel = cur.statusLabel;
+    if (isLock && d) { curStatus = 'running'; curStatusLabel = 'Running'; }
+    const busy = curStatus === 'running' || curStatus === 'waiting' || curStatus === 'stopped';
+    const placeholder = curStatus === 'stopped' ? 'Session stopped' : busy ? 'Turn running — reply when it’s idle' : 'Reply to ' + cur.name;
+    return {
+      shown, filters, cur, curStatus, curStatusLabel, log: cur.log,
+      showAsk: isLock && !d, showResolved: isLock && !!d,
+      decisionLabel: d === 'allow' ? 'allowed' : 'denied', resolvedColor: d === 'allow' ? '#5FD08A' : '#FF8A8A',
+      after: d === 'allow' ? 'Pushed 2 commits to origin/main.' : 'Push was denied, so the commits stay local. Want a branch instead?',
+      waitText: isLock && !d ? 'git push · 2m' : 'nothing', waitColor: isLock && !d ? '#F2B544' : '#9AA3AF',
+      busy, placeholder, sendBg: busy ? '#232731' : '#E6E8EC', sendFg: busy ? '#5B6472' : '#0F1115',
+      allow: () => this.setState({ decision: 'allow' }), deny: () => this.setState({ decision: 'deny' })
+    };
+  }
+}
+</script>
+</body>
+</html>

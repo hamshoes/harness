@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>harness: new session</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1115}
+a{color:#C9CED6;text-decoration:none}a:hover{color:#FFFFFF}
+.lbl{font:600 13px Inter,sans-serif;color:#C9CED6}
+.field{box-sizing:border-box;width:100%;border-radius:10px;border:1px solid #2A2F3A;background:#141720;color:#E6E8EC;padding:10px 12px;font:400 14px 'JetBrains Mono',monospace}
+.field:focus{outline:2px solid #6CA8FF;outline-offset:1px}
+.dir{font:400 12px 'JetBrains Mono',monospace;height:30px;padding:0 10px;border-radius:999px;border:1px solid #2A2F3A;background:transparent;color:#C9CED6;cursor:pointer}
+.dir.on{background:#E6E8EC;color:#0F1115;border-color:#E6E8EC}
+.row{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border-radius:12px;color:#AEB5C0}
+</style>
+</helmet>
+<div style="height: 100vh; min-height: 640px; box-sizing: border-box; background: #0F1115; color: #E6E8EC; font-family: Inter, sans-serif; display: flex; flex-wrap: wrap; overflow: hidden">
+
+  <aside style="flex: 1 1 300px; max-width: 320px; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; border-right: 1px solid #1E222B; background: #0C0E12">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 18px 16px 12px">
+      <a href="Main.dc.html" style="font: 600 15px JetBrains Mono, monospace; color: #E6E8EC">harness</a>
+      <span style="height: 32px; padding: 0 12px; border-radius: 8px; background: #232731; color: #9AA3AF; font-weight: 600; font-size: 13px; display: flex; align-items: center">New</span>
+    </div>
+    <nav aria-label="Sessions" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 4px 8px 12px">
+      <a class="row" href="Main.dc.html"><span style="font: 500 14px JetBrains Mono, monospace; color: #E6E8EC">fix-lock</span><span style="font-size: 12px">waiting · git push</span></a>
+      <a class="row" href="Main.dc.html"><span style="font: 500 14px JetBrains Mono, monospace; color: #E6E8EC">notify-retry</span><span style="font-size: 12px">running</span></a>
+      <a class="row" href="Main.dc.html"><span style="font: 500 14px JetBrains Mono, monospace; color: #E6E8EC">harness-ui</span><span style="font-size: 12px">idle</span></a>
+      <a class="row" href="Main.dc.html"><span style="font: 500 14px JetBrains Mono, monospace; color: #E6E8EC">svc-docs</span><span style="font-size: 12px">failed</span></a>
+    </nav>
+  </aside>
+
+  <main style="flex: 999 1 560px; min-width: 0; height: 100%; overflow-y: auto; display: flex; justify-content: center; padding: 48px 28px; box-sizing: border-box">
+    <form style="width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 24px">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font-size: 24px; font-weight: 700">New session</h1>
+        <p style="margin: 0; font-size: 14px; color: #9AA3AF">Runs through agentic on the box. git push asks you first.</p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <label for="name" class="lbl">Name</label>
+          <input id="name" class="field" value="tidy-ports" autocomplete="off" spellcheck="false">
+          <span style="font-size: 12px; color: #9AA3AF">a–z, 0–9, dashes. Never reused.</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <label for="dir" class="lbl">Directory</label>
+          <input id="dir" class="field" value="{{dir}}" autocomplete="off" spellcheck="false">
+          <span style="font-size: 12px; color: #9AA3AF">Created if it doesn't exist.</span>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: -10px">
+        <span style="font-size: 12px; color: #9AA3AF">Recent</span>
+        <sc-for list="{{dirs}}" as="d" hint-placeholder-count="3">
+          <button type="button" class="{{d.cls}}" onClick="{{d.pick}}">{{d.label}}</button>
+        </sc-for>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <label for="prompt" class="lbl">First message</label>
+        <textarea id="prompt" class="field" rows="10" style="font-family: Inter, sans-serif; line-height: 1.6; resize: vertical">bb ports shows forwards twice after a reconnect. Find why and fix it, then run go vet.</textarea>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 12px">
+        <a href="Main.dc.html" style="height: 40px; padding: 0 20px; border-radius: 8px; background: #E6E8EC; color: #0F1115; font-weight: 600; font-size: 14px; display: flex; align-items: center">Start session</a>
+        <a href="Main.dc.html" style="height: 40px; padding: 0 14px; display: flex; align-items: center; font-size: 14px">Cancel</a>
+        <span style="margin-left: auto; font: 400 11px JetBrains Mono, monospace; color: #9AA3AF">⌘↵ to start</span>
+      </div>
+    </form>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { dir: '~/src/devbox-tools' }; }
+  renderVals() {
+    const recent = ['~/src/devbox-tools', '~/src/hq', '~/src/harness'];
+    return {
+      dir: this.state.dir,
+      dirs: recent.map(d => ({ label: d.replace('~/src/', ''), cls: 'dir' + (this.state.dir === d ? ' on' : ''), pick: () => this.setState({ dir: d }) }))
+    };
+  }
+}
+</script>
+</body>
+</html>
