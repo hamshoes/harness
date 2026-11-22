@@ -48,6 +48,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /fs/roots", s.fsRoots)
 	mux.HandleFunc("GET /fs/ls", s.fsLs)
 	mux.HandleFunc("GET /agents", s.agentList)
+	mux.HandleFunc("POST /crews", s.crewCreate)
+	mux.HandleFunc("GET /crews", s.crewList)
+	mux.HandleFunc("GET /crews/{name}", s.crewGet)
+	mux.HandleFunc("POST /crews/{name}/stop", s.crewStop)
+	mux.HandleFunc("GET /crews/{name}/messages", s.crewMessages)
+	mux.HandleFunc("POST /crews/{name}/send", s.crewSend)
 	static := http.FileServerFS(web.Files)
 	for _, p := range []string{"GET /{$}", "GET /app.css", "GET /app.js", "GET /upload.js", "GET /tree.js"} {
 		mux.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) {
@@ -76,12 +82,18 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, sessions.ErrInvalid):
 		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, sessions.ErrCrewNotFound):
+		writeError(w, http.StatusNotFound, "crew not found")
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "session not found")
-	case errors.Is(err, store.ErrExists):
+	case err == store.ErrExists:
 		writeError(w, http.StatusConflict, "session name already used")
-	case errors.Is(err, sessions.ErrConflict):
+	case errors.Is(err, store.ErrExists):
 		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, sessions.ErrConflict), errors.Is(err, sessions.ErrLimit):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, sessions.ErrTooMany):
+		writeError(w, http.StatusTooManyRequests, err.Error())
 	case errors.Is(err, sessions.ErrClosing):
 		writeError(w, http.StatusServiceUnavailable, "server is shutting down")
 	default:

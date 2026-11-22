@@ -48,9 +48,12 @@ type Session struct {
 	ClaudeSessionID string          `json:"claude_session_id"`
 	CreatedAt       string          `json:"created_at"`
 	UpdatedAt       string          `json:"updated_at"`
-	LastText        string          `json:"last_text"`   // newest assistant_text, first 200 characters
-	LastResult      json.RawMessage `json:"last_result"` // {duration_ms, total_cost_usd} of the newest result, or null
-	WaitingOn       []Waiting       `json:"waiting_on"`  // pending approvals, oldest first
+	LastText        string          `json:"last_text"`        // newest assistant_text, first 200 characters
+	LastResult      json.RawMessage `json:"last_result"`      // {duration_ms, total_cost_usd} of the newest result, or null
+	WaitingOn       []Waiting       `json:"waiting_on"`       // pending approvals, oldest first
+	Crew            string          `json:"crew,omitempty"`   // crew members only
+	Member          string          `json:"member,omitempty"` // the name within the crew
+	Agent           string          `json:"agent,omitempty"`  // the agent definition it runs
 }
 
 // Event is one row of the events table. Data is a JSON object.
@@ -99,6 +102,25 @@ CREATE TABLE IF NOT EXISTS approvals (
 	resolved_at TEXT
 );
 CREATE INDEX IF NOT EXISTS approvals_state ON approvals (state, created_at);
+CREATE TABLE IF NOT EXISTS crews (
+	name TEXT PRIMARY KEY,
+	dir TEXT NOT NULL,
+	goal TEXT NOT NULL,
+	lead TEXT NOT NULL,
+	status TEXT NOT NULL,
+	turns INTEGER NOT NULL DEFAULT 0,
+	max_turns INTEGER NOT NULL,
+	created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS crew_queue (
+	id INTEGER PRIMARY KEY,
+	crew TEXT,
+	to_member TEXT,
+	from_member TEXT,
+	text TEXT,
+	at TEXT
+);
+CREATE INDEX IF NOT EXISTS crew_queue_to ON crew_queue (crew, to_member, id);
 `
 
 // Open opens (creating if needed) dataDir/harness.db and dataDir/blobs.
@@ -121,6 +143,9 @@ func Open(dataDir string) (*Store, error) {
 	if err := addColumns(w, "sessions", map[string]string{
 		"last_text":   `TEXT NOT NULL DEFAULT ''`,
 		"last_result": `TEXT`,
+		"crew":        `TEXT`,
+		"member":      `TEXT`,
+		"agent":       `TEXT`,
 	}); err != nil {
 		w.Close()
 		return nil, fmt.Errorf("updating schema: %w", err)
@@ -144,12 +169,12 @@ func Now() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05.000000Z")
 }
 
-const sessionCols = `name, dir, status, COALESCE(claude_session_id, ''), turns, last_seq, created_at, updated_at, last_text, last_result`
+const sessionCols = `name, dir, status, COALESCE(claude_session_id, ''), turns, last_seq, created_at, updated_at, last_text, last_result, COALESCE(crew, ''), COALESCE(member, ''), COALESCE(agent, '')`
 
 func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	var x Session
 	var result sql.NullString
-	err := row.Scan(&x.Name, &x.Dir, &x.Status, &x.ClaudeSessionID, &x.Turns, &x.LastSeq, &x.CreatedAt, &x.UpdatedAt, &x.LastText, &result)
+	err := row.Scan(&x.Name, &x.Dir, &x.Status, &x.ClaudeSessionID, &x.Turns, &x.LastSeq, &x.CreatedAt, &x.UpdatedAt, &x.LastText, &result, &x.Crew, &x.Member, &x.Agent)
 	if result.Valid {
 		x.LastResult = json.RawMessage(result.String)
 	}

@@ -20,17 +20,19 @@ import (
 
 	"github.com/hamshoes/harness/internal/api"
 	"github.com/hamshoes/harness/internal/approvals"
+	"github.com/hamshoes/harness/internal/mcp"
 	"github.com/hamshoes/harness/internal/sessions"
 	"github.com/hamshoes/harness/internal/store"
 )
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: harness serve [--socket PATH] [--data DIR] [--spool DIR] [--http ADDR] [--roots DIRS] [--permission-mode MODE] [--debug]")
+	fmt.Fprintln(os.Stderr, "       harness mcp --session NAME [--socket PATH]   (the crew MCP server, run by Claude Code)")
 	os.Exit(2)
 }
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "serve" {
+	if len(os.Args) < 2 || (os.Args[1] != "serve" && os.Args[1] != "mcp") {
 		usage()
 	}
 	home, err := os.UserHomeDir()
@@ -38,8 +40,23 @@ func main() {
 		fmt.Fprintln(os.Stderr, "harness:", err)
 		os.Exit(1)
 	}
+	defaultSocket := filepath.Join(home, ".local", "state", "harness", "harness.sock")
+	if os.Args[1] == "mcp" {
+		mfs := flag.NewFlagSet("mcp", flag.ExitOnError)
+		session := mfs.String("session", "", "the crew member session this server speaks for")
+		sock := mfs.String("socket", defaultSocket, "the harness API socket")
+		mfs.Parse(os.Args[2:])
+		if *session == "" || mfs.NArg() > 0 {
+			usage()
+		}
+		if err := mcp.Serve(*session, *sock, version(), os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "harness mcp:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	socket := fs.String("socket", filepath.Join(home, ".local", "state", "harness", "harness.sock"), "Unix socket to serve the API on")
+	socket := fs.String("socket", defaultSocket, "Unix socket to serve the API on")
 	data := fs.String("data", filepath.Join(home, ".local", "share", "harness"), "data directory (harness.db, blobs/)")
 	spool := fs.String("spool", "", "notify spool directory (default: $BOX_NOTIFY_SPOOL, else /etc/box/platform.env)")
 	httpAddr := fs.String("http", "", "also serve the API and the web page on this TCP address (e.g. :8085); empty: socket only")
@@ -125,7 +142,15 @@ func serve(log *slog.Logger, socket, data, spoolFlag, httpAddr, rootsFlag, mode 
 	}
 	defer st.Close()
 
-	mgr := sessions.New(st, mode, log)
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil {
+		closeAll()
+		return fmt.Errorf("finding this binary (for the crew MCP server): %w", err)
+	}
+	mgr := sessions.New(st, sessions.Options{PermissionMode: mode, DataDir: data, Socket: socket, Exe: exe}, log)
 	if err := mgr.Recover(); err != nil {
 		closeAll()
 		return fmt.Errorf("recovering sessions: %w", err)

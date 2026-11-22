@@ -4,6 +4,12 @@
 //   - `-n, --name <name>`: display name of the session. Passed on every invocation, including with
 //     `--resume` (the help doesn't say whether a resumed session keeps the name, so it is repeated).
 //   - `-p`, `--output-format stream-json` (needs `--verbose` with `-p`), `--permission-mode`, `-r, --resume`.
+//   - For crew members (checked on 2.1.323): `--model <model>`, `--allowedTools <tools...>` (variadic: each
+//     tool its own argument, so patterns like `Bash(git log:*)` survive), `--append-system-prompt <prompt>`,
+//     `--mcp-config <configs...>` (a JSON file path). `--permission-mode` choices are acceptEdits, auto,
+//     bypassPermissions, manual, dontAsk, plan; `default` is accepted too. With the default
+//     `--system-prompt-snapshot on`, the appended prompt is recorded on the first request and reused
+//     verbatim on resume.
 //
 // stream-json lines handled here (the headless docs' message shapes):
 //
@@ -47,7 +53,14 @@ type Turn struct {
 	Prompt         string // fed on stdin
 	PermissionMode string
 	ResumeID       string // Claude session id to resume; empty on the first turn
-	Emit           EmitFunc
+
+	// Crew members only; empty for plain sessions.
+	Model              string   // --model
+	AllowedTools       []string // --allowedTools, one argument each
+	AppendSystemPrompt string   // --append-system-prompt
+	MCPConfig          string   // --mcp-config: path of a JSON file
+
+	Emit EmitFunc
 }
 
 // Result is how a turn ended.
@@ -67,7 +80,8 @@ type Proc struct {
 // Start spawns the turn:
 //
 //	agentic run --name <name> -- claude -p --output-format stream-json --verbose \
-//	    --name <name> --permission-mode <mode> [--resume <id>]
+//	    --name <name> --permission-mode <mode> [--resume <id>] \
+//	    [--model M] [--append-system-prompt P] [--mcp-config F] [--allowedTools T…]
 //
 // in its own process group, with the prompt on stdin.
 func Start(t Turn) (*Proc, error) {
@@ -76,6 +90,18 @@ func Start(t Turn) (*Proc, error) {
 		"--name", t.Name, "--permission-mode", t.PermissionMode}
 	if t.ResumeID != "" {
 		args = append(args, "--resume", t.ResumeID)
+	}
+	if t.Model != "" {
+		args = append(args, "--model", t.Model)
+	}
+	if t.AppendSystemPrompt != "" {
+		args = append(args, "--append-system-prompt", t.AppendSystemPrompt)
+	}
+	if t.MCPConfig != "" {
+		args = append(args, "--mcp-config", t.MCPConfig)
+	}
+	if len(t.AllowedTools) > 0 { // variadic: last, so it takes nothing else
+		args = append(append(args, "--allowedTools"), t.AllowedTools...)
 	}
 	cmd := exec.Command("agentic", args...)
 	cmd.Dir = t.Dir

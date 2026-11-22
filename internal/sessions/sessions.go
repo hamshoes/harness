@@ -26,7 +26,9 @@ import (
 // StopGrace is how long a turn gets after SIGINT before SIGKILL.
 const StopGrace = 10 * time.Second
 
-var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
+// plainNameRE is what POST /sessions accepts. Crew members are named <crew>.<member>, which only
+// crews create.
+var plainNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
 // Errors the API maps to status codes.
 var (
@@ -35,17 +37,32 @@ var (
 	ErrExists   = store.ErrExists
 	ErrConflict = errors.New("conflict")
 	ErrClosing  = errors.New("shutting down")
+	ErrLimit    = store.ErrCrewLimit
 )
 
 func invalid(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, a...))
 }
 
+// Options configures a Manager.
+type Options struct {
+	PermissionMode string // the --permission-mode of every turn, unless an agent sets its own
+	DataDir        string // crew members' MCP config files go under DataDir/mcp
+	Socket         string // the API socket, for the crew MCP server
+	Exe            string // this binary, run as the crew MCP server
+}
+
 // Manager owns every session's live state.
 type Manager struct {
 	store          *store.Store
 	permissionMode string
+	opts           Options
 	log            *slog.Logger
+
+	crewMu sync.Mutex // serialises crew creation and stopping
+
+	rateMu sync.Mutex
+	rate   map[string][]time.Time // crew sends per receiver session, for the flood guard
 
 	mu       sync.Mutex
 	live     map[string]*session
@@ -72,8 +89,9 @@ type session struct {
 }
 
 // New returns a manager. Call Recover before serving.
-func New(st *store.Store, permissionMode string, log *slog.Logger) *Manager {
-	return &Manager{store: st, permissionMode: permissionMode, log: log, live: map[string]*session{}}
+func New(st *store.Store, opts Options, log *slog.Logger) *Manager {
+	return &Manager{store: st, permissionMode: opts.PermissionMode, opts: opts, log: log,
+		live: map[string]*session{}, rate: map[string][]time.Time{}}
 }
 
 func (m *Manager) get(name string) *session {
@@ -132,7 +150,7 @@ func (m *Manager) Recover() error {
 		m.setStatus(s, store.StatusIdle)
 		m.log.Info("recovered interrupted turn", "session", x.Name, "turn", x.Turns)
 	}
-	return nil
+	return m.deliverQueued()
 }
 
 // ExpandDir expands a leading ~ and checks dir is absolute and, if it exists, a directory. It reports
@@ -163,8 +181,8 @@ func ExpandDir(dir string) (string, bool, error) {
 
 // Create makes a session and starts its first turn. A missing dir is created first.
 func (m *Manager) Create(name, dir, prompt string) (store.Session, error) {
-	if !nameRE.MatchString(name) {
-		return store.Session{}, invalid("name must match %s", nameRE)
+	if !plainNameRE.MatchString(name) {
+		return store.Session{}, invalid("name must match %s", plainNameRE)
 	}
 	dir, exists, err := ExpandDir(dir)
 	if err != nil {
@@ -196,7 +214,11 @@ func (m *Manager) Create(name, dir, prompt string) (store.Session, error) {
 	if !exists {
 		m.emit(s, "dir_created", map[string]any{"dir": dir})
 	}
-	m.startTurn(s, dir, "", prompt)
+	x, err := m.store.GetSession(name)
+	if err != nil {
+		return store.Session{}, err
+	}
+	m.startTurn(s, x, prompt, nil)
 	return m.store.GetSession(name)
 }
 
@@ -218,10 +240,16 @@ func (m *Manager) Message(name, text string) (store.Session, error) {
 	if x, err = m.store.GetSession(name); err != nil { // fresh, under the lock
 		return store.Session{}, err
 	}
+	if x.Crew != "" { // a crew member: the delivery rules, so it's queued while a turn runs
+		if _, err := m.deliverLocked(s, x, SenderSam, "", text); err != nil {
+			return store.Session{}, err
+		}
+		return m.store.GetSession(name)
+	}
 	if x.Status == store.StatusRunning || x.Status == store.StatusStopped || s.proc != nil {
 		return store.Session{}, fmt.Errorf("%w: session is %s", ErrConflict, x.Status)
 	}
-	m.startTurn(s, x.Dir, x.ClaudeSessionID, text)
+	m.startTurn(s, x, text, nil)
 	return m.store.GetSession(name)
 }
 
@@ -231,42 +259,69 @@ func (m *Manager) isClosing() bool {
 	return m.closing
 }
 
-// startTurn runs with s.mu held.
-func (m *Manager) startTurn(s *session, dir, resumeID, prompt string) {
+// startTurn runs with s.mu held. x is the session's row; extra adds fields to the user_message event.
+// For a crew member the turn is counted against the crew first: ErrLimit (and the crew stops itself)
+// or a stopped crew means no turn starts and the error is returned. Every other failure is recorded
+// in the log as a failed turn and nil is returned.
+func (m *Manager) startTurn(s *session, x store.Session, prompt string, extra map[string]any) error {
+	t := runner.Turn{
+		Name:           s.name,
+		Dir:            x.Dir,
+		Prompt:         prompt,
+		PermissionMode: m.permissionMode,
+		ResumeID:       x.ClaudeSessionID,
+		Emit:           func(typ string, data map[string]any) { m.emitTurn(s, typ, data) },
+	}
+	var cfgErr error
+	if x.Crew != "" {
+		if _, err := m.store.CrewTurn(x.Crew); err != nil {
+			if errors.Is(err, store.ErrCrewLimit) {
+				go m.crewLimit(x.Crew)
+				return err
+			}
+			if errors.Is(err, store.ErrCrewStopped) {
+				return fmt.Errorf("%w: crew %s is stopped", ErrConflict, x.Crew)
+			}
+			return err
+		}
+		cfgErr = m.memberTurn(x, &t)
+	}
+
 	turn, err := m.store.BeginTurn(s.name)
 	if err != nil {
 		m.log.Error("beginning turn", "session", s.name, "err", err)
 		m.setStatus(s, store.StatusFailed)
-		return
+		return nil
 	}
 	s.turn = turn
 	s.emitMu.Lock()
-	s.claudeID = resumeID
+	s.claudeID = x.ClaudeSessionID
 	s.emitMu.Unlock()
-	m.emit(s, "user_message", map[string]any{"text": prompt, "turn": turn})
+	um := map[string]any{"text": prompt, "turn": turn}
+	for k, v := range extra {
+		um[k] = v
+	}
+	m.emit(s, "user_message", um)
 	m.emit(s, "turn_started", map[string]any{"turn": turn})
-	m.log.Info("turn started", "session", s.name, "turn", turn, "resume", resumeID)
+	m.log.Info("turn started", "session", s.name, "turn", turn, "resume", x.ClaudeSessionID)
 	m.log.Debug("turn prompt", "session", s.name, "turn", turn, "prompt", prompt)
 
-	p, err := runner.Start(runner.Turn{
-		Name:           s.name,
-		Dir:            dir,
-		Prompt:         prompt,
-		PermissionMode: m.permissionMode,
-		ResumeID:       resumeID,
-		Emit:           func(typ string, data map[string]any) { m.emitTurn(s, typ, data) },
-	})
+	var p *runner.Proc
+	if err = cfgErr; err == nil {
+		p, err = runner.Start(t)
+	}
 	if err != nil {
 		m.log.Error("starting turn", "session", s.name, "turn", turn, "err", err)
 		m.emit(s, "stderr", map[string]any{"line": "harness: starting turn: " + err.Error()})
 		m.emit(s, "turn_ended", map[string]any{"turn": turn, "exit_code": -1, "status": store.StatusFailed})
 		m.setStatus(s, store.StatusFailed)
-		return
+		return nil
 	}
 	s.proc = p
 	s.ended = make(chan struct{})
 	m.turns.Add(1)
 	go m.finishTurn(s, p, turn, s.ended)
+	return nil
 }
 
 // emitTurn stores a runner event, and records the Claude session id when it first appears or changes.
@@ -314,6 +369,7 @@ func (m *Manager) finishTurn(s *session, p *runner.Proc, turn int, ended chan st
 		}
 		m.emit(s, "turn_ended", map[string]any{"turn": turn, "exit_code": res.ExitCode, "status": status})
 		m.setStatus(s, status)
+		defer m.drainLocked(s) // crew members: queued messages start the next turn
 	}
 	m.log.Info("turn ended", "session", s.name, "turn", turn, "exit_code", res.ExitCode)
 }

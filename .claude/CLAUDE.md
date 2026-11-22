@@ -29,11 +29,13 @@ runs Claude turns headless, stores every event in SQLite, and reports `agentic`'
 ## Layout
 
 ```
-main.go              # `harness serve`
+main.go              # `harness serve`, `harness mcp`
 internal/store       # SQLite: sessions, events; blob files
 internal/runner      # one turn = one process; stream-json → events
-internal/sessions    # session state machine, per-session lock, live fan-out
+internal/sessions    # session state machine, per-session lock, live fan-out; crews and their messaging
 internal/approvals   # spool watcher: approval_pending / approval_resolved events
+internal/agents      # agent definitions: Claude Code subagent files (user, then project)
+internal/mcp         # `harness mcp`: the crew members' stdio MCP server (send, members)
 internal/upload      # POST /files: save uploads (and extract zips) inside one directory, never outside it
 internal/api         # HTTP handlers (Unix socket, and TCP with --http)
 web/                 # the page: index.html, app.css, app.js, embedded; plain JS, no build step
