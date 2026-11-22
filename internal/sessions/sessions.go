@@ -118,32 +118,38 @@ func (m *Manager) Recover() error {
 	return nil
 }
 
-// ExpandDir expands a leading ~ and checks dir is an existing directory with an absolute path.
-func ExpandDir(dir string) (string, error) {
+// ExpandDir expands a leading ~ and checks dir is absolute and, if it exists, a directory. It reports
+// whether the directory exists.
+func ExpandDir(dir string) (string, bool, error) {
 	if dir == "~" || strings.HasPrefix(dir, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		dir = filepath.Join(home, dir[1:])
 	}
 	if !filepath.IsAbs(dir) {
-		return "", invalid("dir must be absolute or start with ~/")
+		return "", false, invalid("dir must be absolute or start with ~/")
 	}
 	dir = filepath.Clean(dir)
 	fi, err := os.Stat(dir)
-	if err != nil || !fi.IsDir() {
-		return "", invalid("dir %s is not an existing directory", dir)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return dir, false, nil
+	case err != nil:
+		return "", false, invalid("dir %s: %v", dir, err)
+	case !fi.IsDir():
+		return "", false, invalid("dir %s exists and is not a directory", dir)
 	}
-	return dir, nil
+	return dir, true, nil
 }
 
-// Create makes a session and starts its first turn.
+// Create makes a session and starts its first turn. A missing dir is created first.
 func (m *Manager) Create(name, dir, prompt string) (store.Session, error) {
 	if !nameRE.MatchString(name) {
 		return store.Session{}, invalid("name must match %s", nameRE)
 	}
-	dir, err := ExpandDir(dir)
+	dir, exists, err := ExpandDir(dir)
 	if err != nil {
 		return store.Session{}, err
 	}
@@ -151,15 +157,28 @@ func (m *Manager) Create(name, dir, prompt string) (store.Session, error) {
 		return store.Session{}, invalid("prompt is required")
 	}
 	s := m.get(name)
-	s.mu.Lock()
+	s.mu.Lock() // every Create of this name goes through this lock, so the checks below hold
 	defer s.mu.Unlock()
 	if m.isClosing() {
 		return store.Session{}, ErrClosing
 	}
+	if _, err := m.store.GetSession(name); err == nil {
+		return store.Session{}, ErrExists
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return store.Session{}, err
+	}
+	if !exists {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return store.Session{}, invalid("creating dir: %v", err)
+		}
+	}
 	if _, err := m.store.CreateSession(name, dir, store.StatusRunning); err != nil {
 		return store.Session{}, err
 	}
-	m.log.Info("session created", "session", name, "dir", dir)
+	m.log.Info("session created", "session", name, "dir", dir, "dir_created", !exists)
+	if !exists {
+		m.emit(s, "dir_created", map[string]any{"dir": dir})
+	}
 	m.startTurn(s, dir, "", prompt)
 	return m.store.GetSession(name)
 }
