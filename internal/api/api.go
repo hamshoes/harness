@@ -55,7 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /crews/{name}/messages", s.crewMessages)
 	mux.HandleFunc("POST /crews/{name}/send", s.crewSend)
 	static := http.FileServerFS(web.Files)
-	for _, p := range []string{"GET /{$}", "GET /app.css", "GET /app.js", "GET /upload.js", "GET /tree.js"} {
+	for _, p := range []string{"GET /{$}", "GET /app.css", "GET /app.js", "GET /upload.js", "GET /tree.js", "GET /crew.js"} {
 		mux.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-cache")
 			static.ServeHTTP(w, r)

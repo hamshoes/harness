@@ -3,5 +3,5 @@ package web
 
 import "embed"
 
-//go:embed index.html app.css app.js upload.js tree.js
+//go:embed index.html app.css app.js upload.js tree.js crew.js
 var Files embed.FS

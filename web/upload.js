@@ -14,7 +14,8 @@ function fmtBytes(n) {
 function uploadTarget() {
   const v = S.view;
   if (v && v.kind === "session" && v.session) return { dir: v.session.dir, session: v.name, view: v };
-  if (v && v.kind === "new") return { dir: v.el.dir.value.trim() || "~/uploads", view: v };
+  if (v && v.kind === "new") return { dir: v.currentDir() || "~/uploads", view: v };
+  if (v && v.kind === "crew" && v.crew) return { dir: v.crew.dir };
   return { dir: "~/uploads" };
 }
 

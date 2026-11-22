@@ -38,7 +38,7 @@ internal/agents      # agent definitions: Claude Code subagent files (user, then
 internal/mcp         # `harness mcp`: the crew members' stdio MCP server (send, members)
 internal/upload      # POST /files: save uploads (and extract zips) inside one directory, never outside it
 internal/api         # HTTP handlers (Unix socket, and TCP with --http)
-web/                 # the page: index.html, app.css, app.js, embedded; plain JS, no build step
+web/                 # the page: index.html, app.css, app.js (+ upload, tree, crew .js), embedded; plain JS, no build step
 docs/                # specs
 ```
 

@@ -181,14 +181,16 @@ function note(text) {
 const EVENT_TYPES = [
   "user_message", "turn_started", "claude_init", "assistant_text", "thinking", "tool_use", "tool_result",
   "result", "raw", "stderr", "stderr_truncated", "turn_ended", "turn_interrupted", "session_stopped",
-  "dir_created", "approval_pending", "approval_resolved", "files_uploaded",
+  "dir_created", "approval_pending", "approval_resolved", "files_uploaded", "crew_message", "crew_sent", "crew_limit",
 ];
-const REFRESH_ON = new Set(["turn_started", "turn_ended", "approval_pending", "approval_resolved", "session_stopped"]);
+const REFRESH_ON = new Set(["turn_started", "turn_ended", "approval_pending", "approval_resolved", "session_stopped", "crew_limit"]);
 
 // ---------- app state ----------
 
 const S = {
   sessions: null, // null until the first load
+  crews: [],
+  openCrews: new Set(), // crews expanded in the sidebar
   filter: "all",
   route: { view: "auto" },
   prevHash: "",
@@ -225,27 +227,77 @@ function renderFilters() {
     }, label)));
 }
 
+function sessionRow(s, cur, label, extra) {
+  return h("button", {
+    type: "button",
+    class: "row" + (extra ? " " + extra : "") + (s.name === cur ? " on" : ""),
+    onclick: () => { location.hash = "#/s/" + enc(s.name); },
+  },
+  h("span", { class: "row-top" }, h("span", { class: "row-name", text: label }), pillEl(s)),
+  s.last_text ? h("span", { class: "row-last", text: s.last_text }) : null,
+  h("span", { class: "row-meta", text: (extra ? s.agent : shortDir(s.dir)) + " · " + ago(s.updated_at) }));
+}
+
+// crewStatus is a crew's pill: stopped, else waiting / running if any member is, else idle.
+function crewStatus(c) {
+  if (c.status === "stopped") return { status: "stopped" };
+  const ms = c.members || [];
+  if (ms.some((m) => statusOf(m) === "waiting")) return { status: "running", waiting_on: [1] };
+  if (ms.some((m) => m.status === "running")) return { status: "running" };
+  return { status: "idle" };
+}
+
+function crewRows(c, curSession, curCrew) {
+  const members = (c.members || []).filter((m) => inFilter(m, S.filter));
+  const open = S.openCrews.has(c.name);
+  const chev = h("span", {
+    class: "row-chev" + (open ? " open" : ""),
+    role: "button",
+    "aria-label": (open ? "Collapse " : "Expand ") + c.name,
+    onclick: (e) => {
+      e.stopPropagation();
+      if (open) S.openCrews.delete(c.name);
+      else S.openCrews.add(c.name);
+      renderList();
+    },
+  }, chevronIcon());
+  const n = (c.members || []).length;
+  const row = h("button", {
+    type: "button",
+    class: "row crew-row" + (c.name === curCrew ? " on" : ""),
+    onclick: () => { S.openCrews.add(c.name); location.hash = "#/c/" + enc(c.name); },
+  },
+  h("span", { class: "row-top" },
+    h("span", { class: "row-name crew-name" }, chev, h("span", { text: c.name })),
+    pillEl(crewStatus(c))),
+  h("span", { class: "row-meta", text: "crew · " + n + (n === 1 ? " member" : " members") + " · " + shortDir(c.dir) }));
+  const out = [row];
+  if (open) for (const m of members) out.push(sessionRow(m, curSession, m.member, "member"));
+  return out;
+}
+
 function renderList() {
   const list = $("list");
   if (S.sessions === null) {
     list.replaceChildren(h("div", { class: "list-empty", text: "Loading…" }));
     return;
   }
-  const cur = S.route.view === "session" ? S.route.name : null;
-  const shown = S.sessions.filter((s) => inFilter(s, S.filter));
-  if (!shown.length) {
+  const curSession = S.route.view === "session" ? S.route.name : null;
+  const curCrew = S.route.view === "crew" ? S.route.name : null;
+  // Crews and plain sessions, newest first.
+  const items = [];
+  for (const c of S.crews || []) {
+    if ((c.members || []).some((m) => inFilter(m, S.filter))) items.push({ at: c.created_at, crew: c });
+  }
+  for (const s of S.sessions) {
+    if (!s.crew && inFilter(s, S.filter)) items.push({ at: s.created_at, session: s });
+  }
+  items.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  if (!items.length) {
     list.replaceChildren(h("div", { class: "list-empty", text: S.sessions.length ? "Nothing here." : "No sessions yet." }));
     return;
   }
-  list.replaceChildren(...shown.map((s) =>
-    h("button", {
-      type: "button",
-      class: "row" + (s.name === cur ? " on" : ""),
-      onclick: () => { location.hash = "#/s/" + enc(s.name); },
-    },
-    h("span", { class: "row-top" }, h("span", { class: "row-name", text: s.name }), pillEl(s)),
-    s.last_text ? h("span", { class: "row-last", text: s.last_text }) : null,
-    h("span", { class: "row-meta", text: shortDir(s.dir) + " · " + ago(s.updated_at) }))));
+  list.replaceChildren(...items.flatMap((it) => it.crew ? crewRows(it.crew, curSession, curCrew) : [sessionRow(it.session, curSession, it.session.name)]));
 }
 
 function renderHealth() {
@@ -271,7 +323,9 @@ async function pollHealth() {
 
 async function pollList() {
   try {
-    S.sessions = await api("GET", "/sessions");
+    const [sessions, crews] = await Promise.all([api("GET", "/sessions"), api("GET", "/crews")]);
+    S.sessions = sessions;
+    S.crews = crews;
   } catch (e) {
     return;
   }
@@ -282,6 +336,10 @@ async function pollList() {
     if (s) v.setSession(s);
   }
   if (v && v.kind === "new") v.updateDirs();
+  if (v && v.kind === "crew") {
+    const c = S.crews.find((x) => x.name === v.name);
+    if (c) v.setCrew(c);
+  }
   if (S.route.view === "auto") autoPick();
 }
 
@@ -300,6 +358,14 @@ function recentDirs() {
 function parseRoute() {
   const hash = location.hash;
   if (hash === "#/new") return { view: "new" };
+  const c = hash.match(/^#\/c\/(.+)$/);
+  if (c) {
+    try {
+      return { view: "crew", name: decodeURIComponent(c[1]) };
+    } catch (e) {
+      return { view: "auto" };
+    }
+  }
   const m = hash.match(/^#\/s\/(.+)$/);
   if (m) {
     try {
@@ -322,6 +388,7 @@ function route() {
   S.route = parseRoute();
   $("new-btn").classList.toggle("on", S.route.view === "new");
   if (S.route.view === "session") showSession(S.route.name);
+  else if (S.route.view === "crew") showCrew(S.route.name);
   else if (S.route.view === "new") showNew();
   else autoPick();
   renderList();
@@ -352,9 +419,18 @@ function autoPick() {
 }
 
 function showSession(name) {
+  const dot = name.indexOf(".");
+  if (dot > 0) S.openCrews.add(name.slice(0, dot));
   if (S.view && S.view.kind === "session" && S.view.name === name) return;
   closeView();
   S.view = new SessionView(name);
+}
+
+function showCrew(name) {
+  S.openCrews.add(name);
+  if (S.view && S.view.kind === "crew" && S.view.name === name) return;
+  closeView();
+  S.view = new CrewView(name);
 }
 
 function showNew() {
@@ -389,8 +465,9 @@ class SessionView {
     E.meta = h("span", { class: "head-meta" });
     E.rawBtn = h("button", { class: "btn-raw", type: "button", title: "Show every event", onclick: () => this.toggleRaw() }, "Raw");
     E.stop = h("button", { class: "btn-stop", type: "button", onclick: () => this.stopClick() }, "Stop session");
+    E.crewLink = h("a", { class: "head-crew", hidden: true });
     const head = h("header", { class: "head" },
-      h("h1", { text: this.name }), E.pill, E.meta, h("div", { class: "head-actions" }, E.rawBtn, E.stop));
+      h("h1", { text: this.name }), E.pill, E.meta, E.crewLink, h("div", { class: "head-actions" }, E.rawBtn, E.stop));
 
     E.inner = h("div", { class: "log-inner" });
     E.log = h("section", { class: "log", "aria-label": "Event log", onscroll: () => this.onScroll() }, E.inner);
@@ -449,6 +526,11 @@ class SessionView {
     E.pill.textContent = pill.textContent;
     E.meta.textContent = shortDir(s.dir) + " · turn " + s.turns;
     E.meta.title = s.dir;
+    if (s.crew) {
+      E.crewLink.hidden = false;
+      E.crewLink.href = "#/c/" + enc(s.crew);
+      E.crewLink.textContent = "crew " + s.crew + " · " + s.agent;
+    }
     if (!E.stop.classList.contains("confirm")) E.stop.disabled = s.status === "stopped";
     this.renderDetails();
     this.updateReply();
@@ -477,10 +559,13 @@ class SessionView {
 
   updateReply() {
     const st = this.session ? this.session.status : null;
-    const can = st === "idle" || st === "failed";
+    const member = !!(this.session && this.session.crew);
+    // Crew members take messages mid-turn too: they wait in the crew queue.
+    const can = st === "idle" || st === "failed" || (member && st === "running");
     const E = this.el;
     E.text.disabled = !can;
     E.text.placeholder = st === "stopped" ? "Session stopped"
+      : can && member ? "Message " + this.session.member + " as sam" + (st === "running" ? " (queued until its turn ends)" : "")
       : can ? "Reply to " + this.name
       : st === null ? ""
       : "Turn running — reply when it's idle";
@@ -600,7 +685,19 @@ class SessionView {
     const d = ev.data || {};
     switch (ev.type) {
       case "user_message":
+        if (Array.isArray(d.from)) return; // a crew delivery: its crew_message rows show it
         this.append(h("div", { class: "ev-user" }, val(d.text)));
+        return;
+      case "crew_message":
+        this.append(h("div", { class: "ev-crew" }, h("span", { class: "ev-crew-from", text: String(d.from == null ? "?" : d.from) }), h("div", { class: "ev-crew-text" }, val(d.text))));
+        return;
+      case "crew_sent": {
+        const first = typeof d.text === "string" ? clip(d.text.split("\n").find((l) => l.trim()) || "", 160) : "";
+        this.append(h("div", { class: "ev-sent" }, "→ " + d.to + ": ", isBlob(d.text) ? blobLink(d.text) : first));
+        return;
+      }
+      case "crew_limit":
+        this.append(h("div", { class: "tool ev-failed", text: "crew reached its turn limit (" + d.turns + " / " + d.max_turns + ") and stopped" }));
         return;
       case "assistant_text":
         this.append(h("p", { class: "ev-text" }, val(d.text)));
@@ -742,7 +839,7 @@ class NewView {
     E.prompt = h("textarea", { id: "prompt", class: "field field-text", rows: 10, onkeydown: submitKey });
     E.start = h("button", { type: "submit", class: "btn-start" }, "Start session");
     E.err = h("div", { class: "form-error", role: "alert" });
-    const form = h("form", { class: "new-form", onsubmit: (e) => { e.preventDefault(); this.submit(); } },
+    this.singleForm = h("form", { class: "new-form", onsubmit: (e) => { e.preventDefault(); this.submit(); } },
       h("div", { class: "new-head" },
         h("h1", { text: "New session" }),
         h("p", { text: "Runs through agentic on the box. git push asks you first." })),
@@ -756,13 +853,45 @@ class NewView {
         h("button", { type: "button", class: "btn-cancel", onclick: () => this.cancel() }, "Cancel"),
         h("span", { class: "kbd new-kbd", text: (isMac ? "⌘↵" : "Ctrl+↵") + " to start" })),
       E.err);
-    main().replaceChildren(h("div", { class: "new-page" }, form));
+    this.mode = "single";
+    this.crew = null; // the CrewForm, made on first switch
+    const tab = (mode, label) => h("button", {
+      type: "button", role: "tab", class: "mode-btn", "data-mode": mode,
+      onclick: () => this.setMode(mode),
+    }, label);
+    this.switchEl = h("div", { class: "mode-switch", role: "tablist", "aria-label": "What to start" }, tab("single", "Single"), tab("crew", "Crew"));
+    this.holder = h("div", { class: "new-holder" });
+    main().replaceChildren(h("div", { class: "new-page" }, h("div", { class: "new-wrap" }, this.switchEl, this.holder)));
+    this.setMode(S.newMode === "crew" ? "crew" : "single");
     this.updateDirs();
-    E.name.focus();
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    S.newMode = mode;
+    for (const b of this.switchEl.children) {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    }
+    if (mode === "crew") {
+      if (!this.crew) this.crew = new CrewForm(this);
+      this.holder.replaceChildren(this.crew.form);
+      this.crew.focus();
+    } else {
+      this.holder.replaceChildren(this.singleForm);
+      this.el.name.focus();
+    }
+  }
+
+  // currentDir is the Directory field of the form on show (where a drop uploads to).
+  currentDir() {
+    return (this.mode === "crew" && this.crew ? this.crew.el.dir.value : this.el.dir.value).trim();
   }
 
   close() {
     this.closed = true;
+    if (this.crew) this.crew.close();
   }
 
   checkName() {
@@ -780,6 +909,7 @@ class NewView {
       this.el.dir.value = dirs[0];
       this.tree.dirChanged();
     }
+    if (this.crew) this.crew.updateDirs();
   }
 
   async submit() {
