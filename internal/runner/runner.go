@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -56,9 +57,10 @@ type Result struct {
 
 // Proc is a running turn.
 type Proc struct {
-	cmd  *exec.Cmd
-	done chan struct{}
-	res  Result
+	cmd      *exec.Cmd
+	done     chan struct{}
+	res      Result
+	signaled atomic.Bool // the turn is being torn down: kill what it leaves behind
 }
 
 // Start spawns the turn:
@@ -116,6 +118,9 @@ func Start(t Turn) (*Proc, error) {
 	}()
 	go func() {
 		code := exitCode(cmd.Wait())
+		if p.signaled.Load() {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // leftovers holding the pipes open
+		}
 		drained := make(chan struct{})
 		go func() { readers.Wait(); close(drained) }()
 		select {
@@ -133,8 +138,10 @@ func Start(t Turn) (*Proc, error) {
 	return p, nil
 }
 
-// Signal sends sig to the turn's whole process group.
+// Signal sends sig to the turn's whole process group. Once the turn's process exits, anything
+// left in the group is killed.
 func (p *Proc) Signal(sig syscall.Signal) error {
+	p.signaled.Store(true)
 	return syscall.Kill(-p.cmd.Process.Pid, sig)
 }
 
