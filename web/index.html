@@ -1,2 +1,33 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>harness</title><link rel="stylesheet" href="app.css"></head><body><script src="app.js"></script></body></html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>harness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <a class="wordmark" href="#/">harness</a>
+      <a class="new-btn" id="new-btn" href="#/new">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+        New
+      </a>
+    </div>
+    <div class="filters" id="filters"></div>
+    <nav class="list" id="list" aria-label="Sessions"></nav>
+    <div class="footer">
+      <span class="dot" id="dot" aria-hidden="true"></span>
+      <span id="health">connecting…</span>
+    </div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
