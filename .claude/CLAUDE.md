@@ -34,6 +34,7 @@ internal/store       # SQLite: sessions, events; blob files
 internal/runner      # one turn = one process; stream-json → events
 internal/sessions    # session state machine, per-session lock, live fan-out
 internal/approvals   # spool watcher: approval_pending / approval_resolved events
+internal/upload      # POST /files: save uploads (and extract zips) inside one directory, never outside it
 internal/api         # HTTP handlers (Unix socket, and TCP with --http)
 web/                 # the page: index.html, app.css, app.js, embedded; plain JS, no build step
 docs/                # specs

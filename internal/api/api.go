@@ -42,6 +42,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions/{name}/stop", s.stop)
 	mux.HandleFunc("GET /blobs/{hash}", s.blob)
 	mux.HandleFunc("GET /approvals", s.approvals)
+	mux.HandleFunc("POST /files", s.files)
 	mux.HandleFunc("GET /healthz", s.healthz)
 	static := http.FileServerFS(web.Files)
 	for _, p := range []string{"GET /{$}", "GET /app.css", "GET /app.js"} {
