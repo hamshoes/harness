@@ -47,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /fs/roots", s.fsRoots)
 	mux.HandleFunc("GET /fs/ls", s.fsLs)
+	mux.HandleFunc("GET /agents", s.agentList)
 	static := http.FileServerFS(web.Files)
 	for _, p := range []string{"GET /{$}", "GET /app.css", "GET /app.js", "GET /upload.js", "GET /tree.js"} {
 		mux.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) {
