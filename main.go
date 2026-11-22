@@ -25,7 +25,7 @@ import (
 )
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: harness serve [--socket PATH] [--data DIR] [--spool DIR] [--http ADDR] [--permission-mode MODE] [--debug]")
+	fmt.Fprintln(os.Stderr, "usage: harness serve [--socket PATH] [--data DIR] [--spool DIR] [--http ADDR] [--roots DIRS] [--permission-mode MODE] [--debug]")
 	os.Exit(2)
 }
 
@@ -43,6 +43,7 @@ func main() {
 	data := fs.String("data", filepath.Join(home, ".local", "share", "harness"), "data directory (harness.db, blobs/)")
 	spool := fs.String("spool", "", "notify spool directory (default: $BOX_NOTIFY_SPOOL, else /etc/box/platform.env)")
 	httpAddr := fs.String("http", "", "also serve the API and the web page on this TCP address (e.g. :8085); empty: socket only")
+	roots := fs.String("roots", "~/projects", "comma-separated directories (under home) the folder tree browses")
 	mode := fs.String("permission-mode", "bypassPermissions", "Claude Code --permission-mode for every turn")
 	debugLog := fs.Bool("debug", false, "debug logging (includes prompt and message bodies)")
 	fs.Parse(os.Args[2:])
@@ -54,7 +55,7 @@ func main() {
 		level = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-	if err := serve(log, *socket, *data, *spool, *httpAddr, *mode); err != nil {
+	if err := serve(log, *socket, *data, *spool, *httpAddr, *roots, *mode); err != nil {
 		log.Error("harness serve", "err", err)
 		os.Exit(1)
 	}
@@ -67,7 +68,11 @@ func version() string {
 	return "dev"
 }
 
-func serve(log *slog.Logger, socket, data, spoolFlag, httpAddr, mode string) error {
+func serve(log *slog.Logger, socket, data, spoolFlag, httpAddr, rootsFlag, mode string) error {
+	roots, err := api.ParseRoots(rootsFlag)
+	if err != nil {
+		return err
+	}
 	for _, bin := range []string{"claude", "agentic"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			return fmt.Errorf("%s is not on PATH", bin)
@@ -133,7 +138,7 @@ func serve(log *slog.Logger, socket, data, spoolFlag, httpAddr, mode string) err
 	baseCtx, cancelBase := context.WithCancel(context.Background())
 	defer cancelBase()
 	srv := &http.Server{
-		Handler:           (&api.Server{Sessions: mgr, Store: st, Version: version(), ClaudeVersion: claudeVersion, Spool: spool, Log: log}).Handler(),
+		Handler:           (&api.Server{Sessions: mgr, Store: st, Version: version(), ClaudeVersion: claudeVersion, Spool: spool, Roots: roots, Log: log}).Handler(),
 		BaseContext:       func(net.Listener) context.Context { return baseCtx },
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),

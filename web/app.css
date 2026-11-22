@@ -145,17 +145,12 @@ button { font-family: inherit; }
 .new-head { display: flex; flex-direction: column; gap: 6px; }
 .new-head h1 { margin: 0; font-size: 24px; font-weight: 700; }
 .new-head p { margin: 0; font-size: 14px; color: var(--muted); }
-.new-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .new-field { display: flex; flex-direction: column; gap: 8px; }
 .lbl { font: 600 13px var(--sans); color: var(--text-2); }
 .field { width: 100%; border-radius: 10px; border: 1px solid var(--input-line); background: var(--input); color: var(--text); padding: 10px 12px; font: 400 14px var(--mono); }
 .field-text { font-family: var(--sans); line-height: 1.6; resize: vertical; }
 .field-hint { font-size: 12px; color: var(--muted); }
 .field-hint.bad { color: var(--failed); }
-.dir-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: -10px; }
-.dir-chips:empty { display: none; }
-.dir { font: 400 12px var(--mono); height: 30px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--input-line); background: transparent; color: var(--text-2); cursor: pointer; }
-.dir.on { background: var(--text); color: var(--page); border-color: var(--text); }
 .new-actions { display: flex; align-items: center; gap: 12px; }
 .btn-start { height: 40px; padding: 0 20px; border-radius: 8px; border: 0; background: var(--text); color: var(--page); font: 600 14px var(--sans); cursor: pointer; }
 .btn-start:disabled { background: var(--stopped); color: var(--idle); cursor: default; }
@@ -200,3 +195,24 @@ button { font-family: inherit; }
 .up-result-head { font-size: 13px; color: var(--ok); overflow-wrap: anywhere; }
 .btn-copy { flex-shrink: 0; height: 24px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--input-line); background: transparent; color: var(--text-2); font: 500 11px var(--sans); cursor: pointer; }
 .btn-copy:hover { color: #FFFFFF; }
+
+/* folder tree */
+.tree-wrap { display: flex; flex-direction: column; gap: 8px; }
+.tree-filter { font-size: 13px; padding: 8px 10px; }
+.tree { height: 320px; overflow-y: auto; border-radius: 10px; border: 1px solid var(--input-line); background: var(--input); padding: 6px 0; outline: none; }
+.tree:focus { outline: 2px solid var(--running); outline-offset: 1px; }
+.tree-empty, .tree-note { padding: 8px 12px; font: 400 12px var(--mono); color: var(--muted); }
+.tree-section { padding: 8px 12px 4px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.tree-row { display: flex; align-items: center; gap: 6px; height: 28px; padding-right: 8px; font: 400 13px var(--mono); color: var(--text-2); cursor: pointer; user-select: none; }
+.tree-row:hover { background: var(--panel); color: var(--text); }
+.tree-row.on { background: var(--sel); color: var(--text); }
+.tree-row.cursor { box-shadow: inset 2px 0 0 var(--running); }
+.tree-chev { flex: 0 0 12px; display: inline-flex; color: var(--muted); transition: transform .1s; }
+.tree-chev.open { transform: rotate(90deg); }
+.tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-branch { flex-shrink: 0; font: 400 11px var(--mono); color: var(--muted); }
+.tree-add { margin-left: auto; flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--input-line); background: transparent; color: var(--text-2); font: 500 14px/1 var(--sans); cursor: pointer; }
+.tree-add:hover { color: #FFFFFF; border-color: var(--idle); }
+.tree-add-row { padding: 2px 8px 4px; }
+.tree-new { width: 100%; max-width: 280px; height: 26px; border-radius: 6px; border: 1px solid var(--input-line); background: var(--page); color: var(--text); padding: 0 8px; font: 400 12px var(--mono); }
+.tree-new.bad { border-color: var(--failed); }

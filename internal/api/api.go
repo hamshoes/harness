@@ -29,6 +29,7 @@ type Server struct {
 	ClaudeVersion string
 	Spool         string
 	Log           *slog.Logger
+	Roots         []Root // what the folder tree may browse
 }
 
 // Handler returns the routes.
@@ -44,8 +45,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /approvals", s.approvals)
 	mux.HandleFunc("POST /files", s.files)
 	mux.HandleFunc("GET /healthz", s.healthz)
+	mux.HandleFunc("GET /fs/roots", s.fsRoots)
+	mux.HandleFunc("GET /fs/ls", s.fsLs)
 	static := http.FileServerFS(web.Files)
-	for _, p := range []string{"GET /{$}", "GET /app.css", "GET /app.js", "GET /upload.js"} {
+	for _, p := range []string{"GET /{$}", "GET /app.css", "GET /app.js", "GET /upload.js", "GET /tree.js"} {
 		mux.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-cache")
 			static.ServeHTTP(w, r)

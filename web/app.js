@@ -733,9 +733,12 @@ class NewView {
     E.nameMsg = h("span", { class: "field-hint", text: NAME_HINT });
     E.dir = h("input", {
       id: "dir", class: "field", autocomplete: "off", spellcheck: "false",
-      oninput: () => { this.dirTouched = true; this.renderChips(); },
+      oninput: () => { this.dirTouched = true; this.tree.dirChanged(); },
     });
-    E.chips = h("div", { class: "dir-chips" });
+    this.tree = new DirTree({
+      getDir: () => E.dir.value,
+      setDir: (p) => { E.dir.value = p; this.dirTouched = true; },
+    });
     E.prompt = h("textarea", { id: "prompt", class: "field field-text", rows: 10, onkeydown: submitKey });
     E.start = h("button", { type: "submit", class: "btn-start" }, "Start session");
     E.err = h("div", { class: "form-error", role: "alert" });
@@ -743,11 +746,10 @@ class NewView {
       h("div", { class: "new-head" },
         h("h1", { text: "New session" }),
         h("p", { text: "Runs through agentic on the box. git push asks you first." })),
-      h("div", { class: "new-grid" },
-        h("div", { class: "new-field" }, h("label", { for: "name", class: "lbl" }, "Name"), E.name, E.nameMsg),
-        h("div", { class: "new-field" }, h("label", { for: "dir", class: "lbl" }, "Directory"), E.dir,
-          h("span", { class: "field-hint", text: "Created if it doesn't exist." }))),
-      E.chips,
+      h("div", { class: "new-field" }, h("label", { for: "name", class: "lbl" }, "Name"), E.name, E.nameMsg),
+      h("div", { class: "new-field" }, h("label", { for: "dir", class: "lbl" }, "Directory"), E.dir,
+        h("span", { class: "field-hint", text: "Created if it doesn't exist. Pick from the tree or type a path." }),
+        this.tree.el),
       h("div", { class: "new-field" }, h("label", { for: "prompt", class: "lbl" }, "First message"), E.prompt),
       h("div", { class: "new-actions" },
         E.start,
@@ -771,24 +773,13 @@ class NewView {
     return !bad && v !== "";
   }
 
-  // updateDirs fills the directory with the newest recent dir until the user types one.
+  // updateDirs fills the directory with the newest recent dir until the user types or picks one.
   updateDirs() {
     const dirs = recentDirs();
-    if (!this.dirTouched && !this.el.dir.value && dirs.length) this.el.dir.value = dirs[0];
-    this.renderChips();
-  }
-
-  renderChips() {
-    const dirs = recentDirs();
-    const cur = this.el.dir.value.trim();
-    this.el.chips.replaceChildren(
-      dirs.length ? h("span", { class: "field-hint", text: "Recent" }) : null,
-      ...dirs.map((d) => h("button", {
-        type: "button",
-        class: "dir" + (d === cur ? " on" : ""),
-        title: d,
-        onclick: () => { this.el.dir.value = d; this.dirTouched = true; this.renderChips(); },
-      }, d.replace(/\/+$/, "").split("/").pop() || d)));
+    if (!this.dirTouched && !this.el.dir.value && dirs.length) {
+      this.el.dir.value = dirs[0];
+      this.tree.dirChanged();
+    }
   }
 
   async submit() {
