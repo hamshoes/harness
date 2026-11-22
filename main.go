@@ -25,7 +25,7 @@ import (
 )
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: harness serve [--socket PATH] [--data DIR] [--spool DIR] [--permission-mode MODE] [--debug]")
+	fmt.Fprintln(os.Stderr, "usage: harness serve [--socket PATH] [--data DIR] [--spool DIR] [--http ADDR] [--permission-mode MODE] [--debug]")
 	os.Exit(2)
 }
 
@@ -42,6 +42,7 @@ func main() {
 	socket := fs.String("socket", filepath.Join(home, ".local", "state", "harness", "harness.sock"), "Unix socket to serve the API on")
 	data := fs.String("data", filepath.Join(home, ".local", "share", "harness"), "data directory (harness.db, blobs/)")
 	spool := fs.String("spool", "", "notify spool directory (default: $BOX_NOTIFY_SPOOL, else /etc/box/platform.env)")
+	httpAddr := fs.String("http", "", "also serve the API and the web page on this TCP address (e.g. :8085); empty: socket only")
 	mode := fs.String("permission-mode", "bypassPermissions", "Claude Code --permission-mode for every turn")
 	debugLog := fs.Bool("debug", false, "debug logging (includes prompt and message bodies)")
 	fs.Parse(os.Args[2:])
@@ -53,7 +54,7 @@ func main() {
 		level = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-	if err := serve(log, *socket, *data, *spool, *mode); err != nil {
+	if err := serve(log, *socket, *data, *spool, *httpAddr, *mode); err != nil {
 		log.Error("harness serve", "err", err)
 		os.Exit(1)
 	}
@@ -66,7 +67,7 @@ func version() string {
 	return "dev"
 }
 
-func serve(log *slog.Logger, socket, data, spoolFlag, mode string) error {
+func serve(log *slog.Logger, socket, data, spoolFlag, httpAddr, mode string) error {
 	for _, bin := range []string{"claude", "agentic"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			return fmt.Errorf("%s is not on PATH", bin)
@@ -93,21 +94,35 @@ func serve(log *slog.Logger, socket, data, spoolFlag, mode string) error {
 		return err
 	}
 	defer os.Remove(socket)
+	listeners := []net.Listener{ln}
+	closeAll := func() {
+		for _, l := range listeners {
+			l.Close()
+		}
+	}
+	if httpAddr != "" {
+		tcp, err := net.Listen("tcp", httpAddr)
+		if err != nil {
+			ln.Close()
+			return fmt.Errorf("--http: %w", err)
+		}
+		listeners = append(listeners, tcp)
+	}
 
 	if err := os.MkdirAll(data, 0o700); err != nil {
-		ln.Close()
+		closeAll()
 		return err
 	}
 	st, err := store.Open(data)
 	if err != nil {
-		ln.Close()
+		closeAll()
 		return fmt.Errorf("opening store: %w", err)
 	}
 	defer st.Close()
 
 	mgr := sessions.New(st, mode, log)
 	if err := mgr.Recover(); err != nil {
-		ln.Close()
+		closeAll()
 		return fmt.Errorf("recovering sessions: %w", err)
 	}
 	watcher := approvals.New(spool, st, mgr, log)
@@ -123,8 +138,13 @@ func serve(log *slog.Logger, socket, data, spoolFlag, mode string) error {
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
-	served := make(chan error, 1)
-	go func() { served <- srv.Serve(ln) }()
+	served := make(chan error, len(listeners))
+	for _, l := range listeners {
+		go func() { served <- srv.Serve(l) }()
+	}
+	if httpAddr != "" {
+		log.Info("serving http", "addr", listeners[1].Addr().String())
+	}
 	log.Info("serving", "socket", socket, "data", data, "spool", spool, "permission_mode", mode, "claude", claudeVersion)
 
 	sigs := make(chan os.Signal, 1)

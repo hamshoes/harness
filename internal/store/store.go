@@ -40,15 +40,17 @@ var (
 
 // Session is one row of the sessions table.
 type Session struct {
-	Name            string    `json:"name"`
-	Dir             string    `json:"dir"`
-	Status          string    `json:"status"`
-	Turns           int       `json:"turns"`
-	LastSeq         int64     `json:"last_seq"`
-	ClaudeSessionID string    `json:"claude_session_id"`
-	CreatedAt       string    `json:"created_at"`
-	UpdatedAt       string    `json:"updated_at"`
-	WaitingOn       []Waiting `json:"waiting_on"` // pending approvals, oldest first
+	Name            string          `json:"name"`
+	Dir             string          `json:"dir"`
+	Status          string          `json:"status"`
+	Turns           int             `json:"turns"`
+	LastSeq         int64           `json:"last_seq"`
+	ClaudeSessionID string          `json:"claude_session_id"`
+	CreatedAt       string          `json:"created_at"`
+	UpdatedAt       string          `json:"updated_at"`
+	LastText        string          `json:"last_text"`   // newest assistant_text, first 200 characters
+	LastResult      json.RawMessage `json:"last_result"` // {duration_ms, total_cost_usd} of the newest result, or null
+	WaitingOn       []Waiting       `json:"waiting_on"`  // pending approvals, oldest first
 }
 
 // Event is one row of the events table. Data is a JSON object.
@@ -75,7 +77,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 	turns INTEGER NOT NULL DEFAULT 0,
 	last_seq INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
+	updated_at TEXT NOT NULL,
+	last_text TEXT NOT NULL DEFAULT '',
+	last_result TEXT
 );
 CREATE TABLE IF NOT EXISTS events (
 	session TEXT NOT NULL,
@@ -114,6 +118,13 @@ func Open(dataDir string) (*Store, error) {
 		w.Close()
 		return nil, fmt.Errorf("creating schema: %w", err)
 	}
+	if err := addColumns(w, "sessions", map[string]string{
+		"last_text":   `TEXT NOT NULL DEFAULT ''`,
+		"last_result": `TEXT`,
+	}); err != nil {
+		w.Close()
+		return nil, fmt.Errorf("updating schema: %w", err)
+	}
 	r, err := sql.Open("sqlite", dsn+"&_pragma=query_only(1)")
 	if err != nil {
 		w.Close()
@@ -133,11 +144,15 @@ func Now() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05.000000Z")
 }
 
-const sessionCols = `name, dir, status, COALESCE(claude_session_id, ''), turns, last_seq, created_at, updated_at`
+const sessionCols = `name, dir, status, COALESCE(claude_session_id, ''), turns, last_seq, created_at, updated_at, last_text, last_result`
 
 func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 	var x Session
-	err := row.Scan(&x.Name, &x.Dir, &x.Status, &x.ClaudeSessionID, &x.Turns, &x.LastSeq, &x.CreatedAt, &x.UpdatedAt)
+	var result sql.NullString
+	err := row.Scan(&x.Name, &x.Dir, &x.Status, &x.ClaudeSessionID, &x.Turns, &x.LastSeq, &x.CreatedAt, &x.UpdatedAt, &x.LastText, &result)
+	if result.Valid {
+		x.LastResult = json.RawMessage(result.String)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -299,6 +314,11 @@ func (s *Store) AppendEventWith(session, typ string, data map[string]any, also f
 		session, ev.Seq, ev.TS, ev.Type, string(ev.Data)); err != nil {
 		return Event{}, err
 	}
+	if col, val, ok := summaryUpdate(typ, data); ok {
+		if _, err := tx.Exec(`UPDATE sessions SET `+col+` = ? WHERE name = ?`, val, session); err != nil {
+			return Event{}, err
+		}
+	}
 	if also != nil {
 		if err := also(tx); err != nil {
 			return Event{}, err
@@ -393,4 +413,57 @@ func (s *Store) BlobPath(hash string) (string, error) {
 		return "", ErrNotFound
 	}
 	return filepath.Join(s.blobDir, h), nil
+}
+
+// addColumns adds columns that a database made by an older build lacks. Pre-alpha: this is the whole
+// migration story.
+func addColumns(db *sql.DB, table string, cols map[string]string) error {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return err
+		}
+		have[n] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for name, def := range cols {
+		if !have[name] {
+			if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + name + ` ` + def); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// summaryUpdate returns the sessions-row update an event implies for the list fields, if any. It reads
+// data as given, before large strings are moved to blobs.
+func summaryUpdate(typ string, data map[string]any) (col string, val any, ok bool) {
+	switch typ {
+	case "assistant_text":
+		text, isStr := data["text"].(string)
+		if !isStr {
+			return "", nil, false
+		}
+		if r := []rune(text); len(r) > 200 {
+			text = string(r[:200])
+		}
+		return "last_text", text, true
+	case "result":
+		raw, err := json.Marshal(map[string]any{"duration_ms": data["duration_ms"], "total_cost_usd": data["total_cost_usd"]})
+		if err != nil {
+			return "", nil, false
+		}
+		return "last_result", string(raw), true
+	}
+	return "", nil, false
 }

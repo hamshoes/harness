@@ -4,14 +4,19 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/hamshoes/harness/internal/sessions"
 	"github.com/hamshoes/harness/internal/store"
+	"github.com/hamshoes/harness/web"
 )
 
 const maxBody = 4 << 20
@@ -38,6 +43,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /blobs/{hash}", s.blob)
 	mux.HandleFunc("GET /approvals", s.approvals)
 	mux.HandleFunc("GET /healthz", s.healthz)
+	static := http.FileServerFS(web.Files)
+	for _, p := range []string{"GET /{$}", "GET /app.css", "GET /app.js"} {
+		mux.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-cache")
+			static.ServeHTTP(w, r)
+		})
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such route")
 	})
@@ -160,8 +172,13 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 		follow = b
 	}
-	if _, err := s.Sessions.Get(name); err != nil {
+	x, err := s.Sessions.Get(name)
+	if err != nil {
 		s.fail(w, err)
+		return
+	}
+	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		s.sse(w, r, x, after)
 		return
 	}
 
@@ -173,7 +190,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		rc.Flush() // the client sees the headers before the first event
 	}
 	enc := json.NewEncoder(w)
-	err := s.Sessions.Follow(r.Context(), name, after, follow, func(ev store.Event) error {
+	err = s.Sessions.Follow(r.Context(), name, after, follow, func(ev store.Event) error {
 		if err := enc.Encode(ev); err != nil {
 			return err
 		}
@@ -243,4 +260,79 @@ func (s *Server) approvals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, xs)
+}
+
+const ssePing = 20 * time.Second
+
+var errStreamDone = errors.New("session stopped")
+
+// sse streams a session's events as server-sent events: id is the seq, event the type, data the same
+// object as an NDJSON line. Last-Event-ID (an EventSource reconnecting) wins over ?after=. The stream
+// ends after session_stopped; a stopped session with nothing new gets 204, which tells EventSource
+// not to reconnect.
+func (s *Server) sse(w http.ResponseWriter, r *http.Request, x store.Session, after int64) {
+	if v := r.Header.Get("Last-Event-ID"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+			after = n
+		}
+	}
+	if x.Status == store.StatusStopped && x.LastSeq <= after {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	rc := http.NewResponseController(w)
+	rc.Flush()
+
+	var mu sync.Mutex // the pinger and the stream share the writer
+	done := make(chan struct{})
+	pinged := make(chan struct{})
+	go func() {
+		defer close(pinged)
+		t := time.NewTicker(ssePing)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				mu.Lock()
+				_, err := io.WriteString(w, ": ping\n\n")
+				if err == nil {
+					err = rc.Flush()
+				}
+				mu.Unlock()
+				if err != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	err := s.Sessions.Follow(r.Context(), x.Name, after, true, func(ev store.Event) error {
+		line, err := json.Marshal(ev)
+		if err != nil {
+			return err
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.Seq, ev.Type, line); err != nil {
+			return err
+		}
+		if err := rc.Flush(); err != nil {
+			return err
+		}
+		if ev.Type == "session_stopped" {
+			return errStreamDone
+		}
+		return nil
+	})
+	close(done)
+	<-pinged
+	if err != nil && !errors.Is(err, errStreamDone) && r.Context().Err() == nil {
+		s.Log.Warn("event stream ended", "session", x.Name, "err", err)
+	}
 }
