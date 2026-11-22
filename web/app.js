@@ -181,7 +181,7 @@ function note(text) {
 const EVENT_TYPES = [
   "user_message", "turn_started", "claude_init", "assistant_text", "thinking", "tool_use", "tool_result",
   "result", "raw", "stderr", "stderr_truncated", "turn_ended", "turn_interrupted", "session_stopped",
-  "dir_created", "approval_pending", "approval_resolved",
+  "dir_created", "approval_pending", "approval_resolved", "files_uploaded",
 ];
 const REFRESH_ON = new Set(["turn_started", "turn_ended", "approval_pending", "approval_resolved", "session_stopped"]);
 
@@ -414,7 +414,7 @@ class SessionView {
       h("div", { class: "reply-inner" },
         h("label", { for: "reply", class: "sr-only" }, "Reply"),
         E.text,
-        h("div", { class: "reply-side" }, E.send, h("span", { class: "kbd", text: isMac ? "⌘↵" : "Ctrl+↵" }))),
+        h("div", { class: "reply-side" }, h("div", { class: "reply-btns" }, uploadButton(), E.send), h("span", { class: "kbd", text: isMac ? "⌘↵" : "Ctrl+↵" }))),
       E.err);
     main().replaceChildren(head, body, form);
     this.updateReply();
@@ -533,6 +533,15 @@ class SessionView {
     this.el.stop.classList.remove("confirm");
     this.el.stop.textContent = "Stop session";
     if (this.session) this.el.stop.disabled = this.session.status === "stopped";
+  }
+
+  // noteUploaded adds a line about an upload to the reply box, if a reply can be sent now.
+  noteUploaded(dir, paths) {
+    const E = this.el;
+    if (E.text.disabled) return;
+    const shown = paths.slice(0, 10).join(", ") + (paths.length > 10 ? ", +" + (paths.length - 10) + " more" : "");
+    const line = "Uploaded to " + dir + ": " + shown;
+    E.text.value = E.text.value.trim() ? E.text.value.replace(/\s+$/, "") + "\n" + line : line;
   }
 
   // ----- the event stream -----
@@ -654,6 +663,11 @@ class SessionView {
       case "session_stopped":
         this.append(note("session stopped"));
         return;
+      case "files_uploaded": {
+        const n = (Array.isArray(d.paths) ? d.paths.length : 0) + (d.more || 0);
+        this.append(note("uploaded " + n + (n === 1 ? " file" : " files") + " to " + shortDir(d.dir)));
+        return;
+      }
       default:
         // claude_init, thinking, result, turn_started, stderr, raw, …: hidden unless Raw
     }
@@ -822,6 +836,7 @@ class NewView {
 
 // ---------- start ----------
 
+initUpload();
 renderFilters();
 renderList();
 route();
