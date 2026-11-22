@@ -1,7 +1,8 @@
 # Working in this repo
 
 `harness` owns Claude Code sessions on the box: `harness serve` exposes a JSON API on a Unix socket,
-runs Claude turns headless and stores every event in SQLite.
+runs Claude turns headless, stores every event in SQLite, and reports `agentic`'s approval holds
+(read from the notify spool) in each session's log.
 
 ## How to work
 
@@ -20,6 +21,10 @@ runs Claude turns headless and stores every event in SQLite.
   changing the runner; the version it was built against is noted in `internal/runner/runner.go`.
   `--name` is mandatory on every `claude` invocation. If the installed version disagrees with a spec,
   stop and ask.
+- Spool: check formats in the devbox-tools source before relying on them (how `agentic` writes ask files,
+  how the notify pair writes answers, the spool's environment variable); the commit read is noted in
+  `internal/approvals/approvals.go`. If something disagrees with the source, stop and ask. Never write,
+  rename, delete or `chmod` anything in the spool. Never log an ask's `detail`. Poll; no file-watching library.
 
 ## Layout
 
@@ -28,6 +33,7 @@ main.go              # `harness serve`
 internal/store       # SQLite: sessions, events; blob files
 internal/runner      # one turn = one process; stream-json → events
 internal/sessions    # session state machine, per-session lock, live fan-out
+internal/approvals   # spool watcher: approval_pending / approval_resolved events
 internal/api         # HTTP handlers on the Unix socket
 docs/                # specs
 ```

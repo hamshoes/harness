@@ -106,3 +106,43 @@ func (s *Store) PendingApprovals() ([]Approval, error) {
 	}
 	return out, rows.Err()
 }
+
+// Waiting is a pending approval as shown on its session.
+type Waiting struct {
+	AskID string `json:"ask_id"`
+	Kind  string `json:"kind"`
+	Title string `json:"title"`
+	Since string `json:"since"`
+}
+
+// waiting returns pending approvals by session, oldest first; session "" means every session.
+func (s *Store) waiting(session string) (map[string][]Waiting, error) {
+	q := `SELECT session, ask_id, kind, title, created_at FROM approvals WHERE state = ?`
+	args := []any{ApprovalPending}
+	if session != "" {
+		q += ` AND session = ?`
+		args = append(args, session)
+	}
+	rows, err := s.r.Query(q+` ORDER BY created_at, ask_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]Waiting{}
+	for rows.Next() {
+		var name string
+		var w Waiting
+		if err := rows.Scan(&name, &w.AskID, &w.Kind, &w.Title, &w.Since); err != nil {
+			return nil, err
+		}
+		out[name] = append(out[name], w)
+	}
+	return out, rows.Err()
+}
+
+// CountPending returns the number of pending approvals.
+func (s *Store) CountPending() (int, error) {
+	var n int
+	err := s.r.QueryRow(`SELECT COUNT(*) FROM approvals WHERE state = ?`, ApprovalPending).Scan(&n)
+	return n, err
+}

@@ -40,14 +40,15 @@ var (
 
 // Session is one row of the sessions table.
 type Session struct {
-	Name            string `json:"name"`
-	Dir             string `json:"dir"`
-	Status          string `json:"status"`
-	Turns           int    `json:"turns"`
-	LastSeq         int64  `json:"last_seq"`
-	ClaudeSessionID string `json:"claude_session_id"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	Name            string    `json:"name"`
+	Dir             string    `json:"dir"`
+	Status          string    `json:"status"`
+	Turns           int       `json:"turns"`
+	LastSeq         int64     `json:"last_seq"`
+	ClaudeSessionID string    `json:"claude_session_id"`
+	CreatedAt       string    `json:"created_at"`
+	UpdatedAt       string    `json:"updated_at"`
+	WaitingOn       []Waiting `json:"waiting_on"` // pending approvals, oldest first
 }
 
 // Event is one row of the events table. Data is a JSON object.
@@ -160,7 +161,16 @@ func (s *Store) CreateSession(name, dir, status string) (Session, error) {
 
 // GetSession returns one session, or ErrNotFound.
 func (s *Store) GetSession(name string) (Session, error) {
-	return scanSession(s.r.QueryRow(`SELECT `+sessionCols+` FROM sessions WHERE name = ?`, name))
+	x, err := scanSession(s.r.QueryRow(`SELECT `+sessionCols+` FROM sessions WHERE name = ?`, name))
+	if err != nil {
+		return x, err
+	}
+	w, err := s.waiting(name)
+	x.WaitingOn = w[name]
+	if x.WaitingOn == nil {
+		x.WaitingOn = []Waiting{}
+	}
+	return x, err
 }
 
 // ListSessions returns all sessions, newest first. With status set, only those in that status.
@@ -184,7 +194,16 @@ func (s *Store) ListSessions(status string) ([]Session, error) {
 		}
 		out = append(out, x)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	w, err := s.waiting("")
+	for i := range out {
+		if out[i].WaitingOn = w[out[i].Name]; out[i].WaitingOn == nil {
+			out[i].WaitingOn = []Waiting{}
+		}
+	}
+	return out, err
 }
 
 // CountByStatus returns the number of sessions in each status (every status present, zero or not).

@@ -36,6 +36,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sessions/{name}/messages", s.message)
 	mux.HandleFunc("POST /sessions/{name}/stop", s.stop)
 	mux.HandleFunc("GET /blobs/{hash}", s.blob)
+	mux.HandleFunc("GET /approvals", s.approvals)
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such route")
@@ -208,10 +209,38 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	pending, err := s.Store.CountPending()
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":             true,
-		"version":        s.Version,
-		"claude_version": s.ClaudeVersion,
-		"sessions":       counts,
+		"ok":                true,
+		"version":           s.Version,
+		"claude_version":    s.ClaudeVersion,
+		"sessions":          counts,
+		"pending_approvals": pending,
+		"spool":             s.Spool,
 	})
+}
+
+// approvals lists approvals, newest first, at most 200: ?state=pending (default), all, or one state.
+func (s *Server) approvals(w http.ResponseWriter, r *http.Request) {
+	state := r.URL.Query().Get("state")
+	switch state {
+	case "":
+		state = store.ApprovalPending
+	case "all":
+		state = ""
+	case store.ApprovalPending, store.ApprovalAllow, store.ApprovalDeny, store.ApprovalCancelled, store.ApprovalWithdrawn:
+	default:
+		writeError(w, http.StatusBadRequest, "state must be pending, all, allow, deny, cancelled or withdrawn")
+		return
+	}
+	xs, err := s.Store.Approvals(state, 200)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, xs)
 }
